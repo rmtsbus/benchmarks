@@ -5,12 +5,12 @@
 # the VM independently.
 #
 # Required env:
-#   PROVIDER                  e.g. e2b
-#   PG_URL                    Neon connection string
-#   R2_ENDPOINT, R2_BUCKET    Cloudflare R2 target for raw results
-#   R2_ACCESS_KEY_ID
-#   R2_SECRET_ACCESS_KEY
-#   Provider-specific keys    e.g. E2B_API_KEY (validated by the coordinator)
+#   PROVIDER                          e.g. e2b
+#   PG_URL                            Neon connection string
+#   TIGRIS_STORAGE_ENDPOINT, _BUCKET  Tigris (S3-compat) target for raw results
+#   TIGRIS_STORAGE_ACCESS_KEY_ID
+#   TIGRIS_STORAGE_SECRET_ACCESS_KEY
+#   Provider-specific keys            e.g. E2B_API_KEY (validated by coordinator)
 #
 # Optional env:
 #   RUN_ID                    Defaults to "YYYYMMDDTHHMMSSZ-<sha8>-<provider>"
@@ -25,10 +25,10 @@ set -euo pipefail
 # ----- inputs ---------------------------------------------------------------
 : "${PROVIDER:?PROVIDER required (e.g. e2b)}"
 : "${PG_URL:?PG_URL required}"
-: "${R2_ENDPOINT:?R2_ENDPOINT required}"
-: "${R2_BUCKET:?R2_BUCKET required}"
-: "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID required}"
-: "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY required}"
+: "${TIGRIS_STORAGE_ENDPOINT:?TIGRIS_STORAGE_ENDPOINT required}"
+: "${TIGRIS_STORAGE_BUCKET:?TIGRIS_STORAGE_BUCKET required}"
+: "${TIGRIS_STORAGE_ACCESS_KEY_ID:?TIGRIS_STORAGE_ACCESS_KEY_ID required}"
+: "${TIGRIS_STORAGE_SECRET_ACCESS_KEY:?TIGRIS_STORAGE_SECRET_ACCESS_KEY required}"
 
 GITHUB_SHA="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo local)}"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_SHA:0:8}-${PROVIDER}}"
@@ -69,9 +69,9 @@ nsc instance upload "$INSTANCE_ID" dist/burst-100k.cjs /root/coordinator.cjs
 # run is recorded even if the SSH hand-off below fails.
 echo "[launch] 5/6 recording run in Postgres"
 psql "$PG_URL" -v ON_ERROR_STOP=1 -q -c "
-  INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status, r2_prefix)
+  INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status, tigris_prefix)
   VALUES ('$RUN_ID', '$PROVIDER', '$GITHUB_SHA', '$INSTANCE_ID', now(), 'running',
-          's3://${R2_BUCKET}/${RUN_ID}/')
+          's3://${TIGRIS_STORAGE_BUCKET}/${RUN_ID}/')
   ON CONFLICT (id) DO NOTHING;
 "
 
@@ -98,10 +98,10 @@ trap 'rm -f "$STARTUP_FILE" "$CIDFILE"' EXIT
   printf 'export INSTANCE_ID=%q\n'          "$INSTANCE_ID"
   printf 'export GITHUB_SHA=%q\n'           "$GITHUB_SHA"
   printf 'export PG_URL=%q\n'               "$PG_URL"
-  printf 'export R2_ENDPOINT=%q\n'          "$R2_ENDPOINT"
-  printf 'export R2_BUCKET=%q\n'            "$R2_BUCKET"
-  printf 'export R2_ACCESS_KEY_ID=%q\n'     "$R2_ACCESS_KEY_ID"
-  printf 'export R2_SECRET_ACCESS_KEY=%q\n' "$R2_SECRET_ACCESS_KEY"
+  printf 'export TIGRIS_STORAGE_ENDPOINT=%q\n'          "$TIGRIS_STORAGE_ENDPOINT"
+  printf 'export TIGRIS_STORAGE_BUCKET=%q\n'            "$TIGRIS_STORAGE_BUCKET"
+  printf 'export TIGRIS_STORAGE_ACCESS_KEY_ID=%q\n'     "$TIGRIS_STORAGE_ACCESS_KEY_ID"
+  printf 'export TIGRIS_STORAGE_SECRET_ACCESS_KEY=%q\n' "$TIGRIS_STORAGE_SECRET_ACCESS_KEY"
   printf 'export E2B_API_KEY=%q\n'          "${E2B_API_KEY:-}"
   if [ -n "${CONCURRENCY_TARGET:-}" ]; then
     printf 'export CONCURRENCY_TARGET=%q\n' "$CONCURRENCY_TARGET"
@@ -117,13 +117,23 @@ nsc instance upload "$INSTANCE_ID" "$STARTUP_FILE" /root/start.sh
 nsc ssh "$INSTANCE_ID" -- chmod 600 /root/start.sh
 nsc ssh "$INSTANCE_ID" -- sh /root/start.sh
 
-# Verify the coordinator actually started — past failures silently exited
-# the launch sequence with a 0 status while leaving the VM idle.
-sleep 2
-if nsc ssh "$INSTANCE_ID" -- pgrep -x node > /dev/null 2>&1; then
-  echo "[launch] node confirmed running on VM"
-else
-  echo "[launch] ERROR: node not running on VM after hand-off"
+# Verify the coordinator actually started. Past failures silently exited
+# the launch sequence with a 0 status while leaving the VM idle, so this is
+# load-bearing. Retry briefly because `nsc ssh` can race the fork on a cold
+# VM, and use `pgrep -f` against the command line (more reliable than
+# `pgrep -x node` under BusyBox).
+CONFIRMED=0
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if nsc ssh "$INSTANCE_ID" -- pgrep -f coordinator.cjs > /dev/null 2>&1; then
+    echo "[launch] node confirmed running on VM (after ${i}s)"
+    CONFIRMED=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$CONFIRMED" -ne 1 ]; then
+  echo "[launch] ERROR: node not running on VM after 10s"
   echo "         tail /root/run.log for details:"
   nsc ssh "$INSTANCE_ID" -- tail -30 /root/run.log || true
   exit 1

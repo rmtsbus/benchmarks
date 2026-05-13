@@ -1,7 +1,7 @@
 import { config as loadDotenv } from 'dotenv';
 import { getProvider } from './providers.js';
 import { PostgresSink } from './sinks/postgres.js';
-import { R2Sink } from './sinks/r2.js';
+import { TigrisSink } from './sinks/tigris.js';
 import { runBurst } from './runner.js';
 import type { ProgressStats } from './types.js';
 
@@ -15,14 +15,14 @@ async function main() {
   const RUN_ID = required('RUN_ID');
   const PROVIDER = required('PROVIDER');
   const PG_URL = required('PG_URL');
-  const R2_ENDPOINT = required('R2_ENDPOINT');
-  const R2_BUCKET = required('R2_BUCKET');
-  const R2_ACCESS_KEY_ID = required('R2_ACCESS_KEY_ID');
-  const R2_SECRET_ACCESS_KEY = required('R2_SECRET_ACCESS_KEY');
+  const TIGRIS_STORAGE_ENDPOINT = required('TIGRIS_STORAGE_ENDPOINT');
+  const TIGRIS_STORAGE_BUCKET = required('TIGRIS_STORAGE_BUCKET');
+  const TIGRIS_STORAGE_ACCESS_KEY_ID = required('TIGRIS_STORAGE_ACCESS_KEY_ID');
+  const TIGRIS_STORAGE_SECRET_ACCESS_KEY = required('TIGRIS_STORAGE_SECRET_ACCESS_KEY');
 
   const commit_sha = process.env.GITHUB_SHA ?? 'local';
   const instance_id = process.env.INSTANCE_ID ?? 'local';
-  const r2_prefix = `s3://${R2_BUCKET}/${RUN_ID}/`;
+  const tigris_prefix = `s3://${TIGRIS_STORAGE_BUCKET}/${RUN_ID}/`;
 
   const provider = getProvider(PROVIDER);
 
@@ -46,10 +46,15 @@ async function main() {
 
   const pg = new PostgresSink(PG_URL, RUN_ID);
   await pg.connect();
-  await pg.bootstrap(PROVIDER, commit_sha, instance_id, r2_prefix);
+  await pg.bootstrap(PROVIDER, commit_sha, instance_id, tigris_prefix);
 
-  const r2 = new R2Sink(
-    { endpoint: R2_ENDPOINT, bucket: R2_BUCKET, accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
+  const tigris = new TigrisSink(
+    {
+      endpoint: TIGRIS_STORAGE_ENDPOINT,
+      bucket: TIGRIS_STORAGE_BUCKET,
+      accessKeyId: TIGRIS_STORAGE_ACCESS_KEY_ID,
+      secretAccessKey: TIGRIS_STORAGE_SECRET_ACCESS_KEY,
+    },
     RUN_ID,
   );
 
@@ -59,7 +64,7 @@ async function main() {
   const heartbeat = setInterval(() => {
     const ts = new Date().toISOString();
     pg.heartbeat(lastStats).catch(err => console.error('[heartbeat:pg]', err.message));
-    r2.writeHeartbeat({ ...lastStats, ts }).catch(err => console.error('[heartbeat:r2]', err.message));
+    tigris.writeHeartbeat({ ...lastStats, ts }).catch(err => console.error('[heartbeat:tigris]', err.message));
     console.log(`[heartbeat] done=${lastStats.done} in_flight=${lastStats.in_flight} errors=${lastStats.errors}`);
   }, HEARTBEAT_INTERVAL_MS);
 
@@ -71,7 +76,7 @@ async function main() {
     clearInterval(heartbeat);
     try {
       await pg.flush();
-      await r2.close();
+      await tigris.close();
       await pg.fail(`Process received ${signal} at done=${lastStats.done}/${provider.concurrencyTarget}`);
       await pg.close();
     } catch (e: any) {
@@ -88,7 +93,7 @@ async function main() {
     await runBurst(provider, compute, {
       async onResult(result) {
         if (result.status === 'ok') latencies.push(result.latency_ms);
-        r2.writeResult(result);
+        tigris.writeResult(result);
         await pg.write(result);
       },
       onProgress(stats) {
@@ -110,8 +115,8 @@ async function main() {
     };
 
     await pg.flush();
-    await r2.close();
-    await r2.writeMeta({ ...final, run_id: RUN_ID, provider: PROVIDER, ended_at: new Date().toISOString() });
+    await tigris.close();
+    await tigris.writeMeta({ ...final, run_id: RUN_ID, provider: PROVIDER, ended_at: new Date().toISOString() });
     await pg.complete(final);
     await pg.close();
 
@@ -121,7 +126,7 @@ async function main() {
     console.error('[coordinator] run failed:', err?.message ?? err);
     try {
       await pg.flush();
-      await r2.close();
+      await tigris.close();
       await pg.fail(err?.message ?? String(err));
       await pg.close();
     } catch (e: any) {

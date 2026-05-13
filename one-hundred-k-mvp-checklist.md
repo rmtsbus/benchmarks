@@ -14,8 +14,8 @@ Check items off as they land.
 - [x] Namespace auth via static token (`NSC_TOKEN` env secret in `burst-100k` environment); OIDC trust deferred
 - [x] First opt-in provider selected: **e2b** (single env var: `E2B_API_KEY`)
 - [x] GitHub `burst-100k` environment created with reviewer protection
-- [x] Environment secrets present: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `NSC_TOKEN`
-- [x] Environment variable present: `R2_BUCKET`
+- [x] Environment secrets present: `TIGRIS_STORAGE_ACCESS_KEY_ID`, `TIGRIS_STORAGE_SECRET_ACCESS_KEY`, `TIGRIS_STORAGE_ENDPOINT`, `NSC_TOKEN`
+- [x] Environment variable present: `TIGRIS_STORAGE_BUCKET`
 - [x] Environment secret present: `PG_URL` (Neon connection string)
 - [x] Environment secret present for chosen provider: `E2B_API_KEY`
 - [ ] Open question #1 resolved with Namespace: dedicated egress IP or shared SNAT pool? *(non-blocking — find out before first 100k run)*

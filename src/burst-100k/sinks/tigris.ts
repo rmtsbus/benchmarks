@@ -3,21 +3,21 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { PassThrough } from 'node:stream';
 import type { SandboxResult, ProgressStats, FinalStats } from '../types.js';
 
-export interface R2Config {
+export interface TigrisConfig {
   endpoint: string;
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
 }
 
-export class R2Sink {
+export class TigrisSink {
   private client: S3Client;
   private bucket: string;
   private prefix: string;
   private rawStream: PassThrough;
   private rawUploadDone: Promise<unknown>;
 
-  constructor(config: R2Config, runId: string) {
+  constructor(config: TigrisConfig, runId: string) {
     this.client = new S3Client({
       endpoint: config.endpoint,
       region: 'auto',
@@ -29,10 +29,10 @@ export class R2Sink {
     this.bucket = config.bucket;
     this.prefix = `${runId}/`;
 
-    // Multipart streaming upload of raw.jsonl. S3/R2 multipart minimum part
-    // size is 5 MiB; lib-storage's Upload buffers internally until that
-    // threshold and then uploads parts. Crash-loss window: at most one part
-    // worth of records.
+    // Multipart streaming upload of raw.jsonl. S3-compatible multipart
+    // minimum part size is 5 MiB; lib-storage's Upload buffers internally
+    // until that threshold and then uploads parts. Crash-loss window: at
+    // most one part worth of records.
     this.rawStream = new PassThrough();
     const upload = new Upload({
       client: this.client,

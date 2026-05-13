@@ -45,7 +45,7 @@ irrelevant to the run.
 - Dashboards or visual reporting.
 - Multi-region or active-active redundancy.
 - Cross-run comparisons or historical analysis (the data will land in
-  Postgres and R2; querying it is out of scope here).
+  Postgres and Tigris; querying it is out of scope here).
 
 ---
 
@@ -55,7 +55,7 @@ The 100k burst is a new sibling module to the existing `src/sandbox/`,
 `src/browser/`, and `src/storage/` families. It does **not** plug into
 `src/run.ts` — that dispatcher assumes in-process execution and local-JSON
 output, which is the wrong model for a coordinator that runs detached on a
-remote VM and streams to R2/Postgres.
+remote VM and streams to Tigris/Postgres.
 
 ```
 src/burst-100k/
@@ -63,7 +63,7 @@ src/burst-100k/
   providers.ts          ← opt-in provider list (extends existing ProviderConfig)
   runner.ts             ← concurrency limiter, ramp, shared https.Agent
   sinks/
-    r2.ts               ← JSONL multipart upload + heartbeat.json
+    tigris.ts           ← JSONL multipart upload + heartbeat.json
     postgres.ts         ← runs table + batch sandbox_results inserts + heartbeat
   types.ts
 
@@ -105,7 +105,7 @@ GitHub Action (workflow_dispatch / schedule)
                               ▼
                      Namespace instance (one per provider, lives for hours)
                         ├─ bursts 100k concurrent requests at target provider
-                        ├─ streams JSONL → R2 (raw per-request records)
+                        ├─ streams JSONL → Tigris (raw per-request records)
                         ├─ batch-inserts → Postgres (queryable rows)
                         ├─ heartbeat → Postgres every 30s
                         └─ UPDATE runs SET status='done' on completion
@@ -154,10 +154,10 @@ jobs:
       - name: Launch benchmark
         env:
           PROVIDER:       ${{ inputs.provider }}
-          R2_ENDPOINT:    ${{ secrets.R2_ENDPOINT }}
-          R2_ACCESS_KEY:  ${{ secrets.R2_ACCESS_KEY }}
-          R2_SECRET_KEY:  ${{ secrets.R2_SECRET_KEY }}
-          R2_BUCKET:      ${{ secrets.R2_BUCKET }}
+          TIGRIS_STORAGE_ENDPOINT:    ${{ secrets.TIGRIS_STORAGE_ENDPOINT }}
+          TIGRIS_STORAGE_ACCESS_KEY_ID:  ${{ secrets.TIGRIS_STORAGE_ACCESS_KEY_ID }}
+          TIGRIS_STORAGE_SECRET_ACCESS_KEY:  ${{ secrets.TIGRIS_STORAGE_SECRET_ACCESS_KEY }}
+          TIGRIS_STORAGE_BUCKET:      ${{ secrets.TIGRIS_STORAGE_BUCKET }}
           PG_URL:         ${{ secrets.PG_URL }}
           # Provider env vars — same names already used by the daily benchmark
           # (see src/sandbox/providers.ts). Passed through unconditionally; the
@@ -189,20 +189,22 @@ npx --yes esbuild src/burst-100k/coordinator.ts \
 psql "$PG_URL" -f db/burst-100k.sql
 
 # 3. Provision a dedicated Namespace instance for this run
-INSTANCE_ID=$(nsc create \
+CIDFILE="$(mktemp)"
+nsc create \
+  --bare \
   --machine_type 16x32 \
   --duration 12h \
-  --features kubernetes-disabled \
-  --output_to /dev/stdout)
+  --cidfile "$CIDFILE"
+INSTANCE_ID="$(cat "$CIDFILE")"
 
 # 4. Upload bundle
 nsc instance upload "$INSTANCE_ID" coordinator.js /root/coordinator.js
 
 # 5. Record the run as started, BEFORE handing off
 psql "$PG_URL" -c "
-  INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status, r2_prefix)
+  INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status, tigris_prefix)
   VALUES ('$RUN_ID', '$PROVIDER', '$GITHUB_SHA', '$INSTANCE_ID', now(), 'running',
-          's3://${R2_BUCKET}/${RUN_ID}/');
+          's3://${TIGRIS_STORAGE_BUCKET}/${RUN_ID}/');
 "
 
 # 6. Start coordinator detached on the instance, forwarding env.
@@ -211,8 +213,8 @@ psql "$PG_URL" -c "
 nsc ssh "$INSTANCE_ID" -- bash -c "'
   ulimit -n 200000
   export RUN_ID=$RUN_ID PROVIDER=$PROVIDER \
-         R2_ENDPOINT=$R2_ENDPOINT R2_BUCKET=$R2_BUCKET \
-         R2_ACCESS_KEY=$R2_ACCESS_KEY R2_SECRET_KEY=$R2_SECRET_KEY \
+         TIGRIS_STORAGE_ENDPOINT=$TIGRIS_STORAGE_ENDPOINT TIGRIS_STORAGE_BUCKET=$TIGRIS_STORAGE_BUCKET \
+         TIGRIS_STORAGE_ACCESS_KEY_ID=$TIGRIS_STORAGE_ACCESS_KEY_ID TIGRIS_STORAGE_SECRET_ACCESS_KEY=$TIGRIS_STORAGE_SECRET_ACCESS_KEY \
          PG_URL=\"$PG_URL\" \
          E2B_API_KEY=\"${E2B_API_KEY:-}\" \
          MODAL_TOKEN_ID=\"${MODAL_TOKEN_ID:-}\" \
@@ -237,8 +239,8 @@ under a minute. The Action then exits successfully and stops mattering.
   handshakes and DNS still want headroom.
 - **Lifetime:** `--duration 12h` — the instance self-destructs at the deadline
   even if the coordinator hangs. Tune to the longest expected run plus margin.
-- **Services:** `--features kubernetes-disabled` (or whichever flag in current
-  `nsc`) — we don't need k3s; a plain VM is lighter and starts faster.
+- **Services:** `--bare` — we don't need k3s; a plain VM is lighter and
+  starts faster. (Replaces the older `--features kubernetes-disabled` flag.)
 - **Network:** one Namespace instance per provider means the source-IP pool
   is naturally partitioned by target. Confirm with Namespace support whether
   each instance gets a dedicated egress IP or shares a SNAT pool — this
@@ -259,13 +261,13 @@ convention from `src/sandbox/providers.ts`.
 Responsibilities:
 
 - Read core inputs from environment variables (`RUN_ID`, `PROVIDER`,
-  `R2_*`, `PG_URL`).
+  `TIGRIS_STORAGE_*`, `PG_URL`).
 - Look up the entry for `$PROVIDER` in `src/burst-100k/providers.ts`. That
   entry declares `requiredEnvVars`, `createCompute()`, `sandboxOptions`, plus
   burst-specific tuning fields.
 - If any `requiredEnvVars` are missing, fail fast and `UPDATE` the `runs`
   row to `status='failed'` with a clear message.
-- Stream results to R2 and Postgres as the run progresses.
+- Stream results to Tigris and Postgres as the run progresses.
 - Emit a heartbeat every 30s.
 - Trap `SIGTERM`, flush in-flight writes, exit cleanly.
 
@@ -304,8 +306,8 @@ Critical implementation details for the 100k burst:
   to interpret.
 - **DNS** for the target provider: resolve once at startup, reuse the IP.
 - **Local result file** via `fs.createWriteStream` in append mode, JSONL
-  format. A background loop reads chunks and uploads to R2 using multipart
-  upload (see R2 layout below).
+  format. A background loop reads chunks and uploads to Tigris using
+  multipart upload (see Tigris layout below).
 - **Memory:** never hold the result set in memory. Write line, forget line.
 - **`ulimit -n 200000`** must be set before `node` starts (the launch script
   does this in the SSH command).
@@ -315,7 +317,7 @@ Critical implementation details for the 100k burst:
     - `net.ipv4.tcp_tw_reuse = 1`
 - **Heartbeat** every 30s: write `{done, in_flight, errors, ts}` to Postgres
   (`UPDATE runs SET last_heartbeat = ...`) AND overwrite a tiny JSON object
-  in R2 at `s3://<bucket>/<run_id>/heartbeat.json`. The Postgres heartbeat
+  in Tigris at `s3://<bucket>/<run_id>/heartbeat.json`. The Postgres heartbeat
   lets you `SELECT * FROM runs WHERE last_heartbeat < now() - interval '5
   minutes'` to find stuck runs.
 - **Completion**: on clean exit, `UPDATE runs SET status='done',
@@ -323,7 +325,7 @@ Critical implementation details for the 100k burst:
   uncaught error, same query with `status='failed'` and the error in a text
   column.
 
-### 4. Data stores — R2 and Postgres
+### 4. Data stores — Tigris and Postgres
 
 Both stores are pre-existing infra. The coordinator writes to both.
 
@@ -351,7 +353,7 @@ CREATE TABLE IF NOT EXISTS runs (
   p50_latency_ms        INTEGER,
   p99_latency_ms        INTEGER,
   error_message         TEXT,                       -- populated on failure
-  r2_prefix             TEXT NOT NULL               -- e.g. s3://bench/<run_id>/
+  tigris_prefix             TEXT NOT NULL               -- e.g. s3://bench/<run_id>/
 );
 
 CREATE INDEX IF NOT EXISTS runs_provider_started ON runs (provider, started_at DESC);
@@ -381,7 +383,7 @@ Batch-insert `sandbox_results` in groups of 1000 with a single `COPY` or
 multi-row `INSERT` to keep the write rate manageable. 100k rows per run is
 small for Postgres; the index size matters more than insert rate.
 
-### R2 — raw, append-only
+### Tigris — raw, append-only
 
 One prefix per run:
 
@@ -395,10 +397,10 @@ s3://<bucket>/<run_id>/
 
 `raw.jsonl` is the source of truth — anything you might want to re-analyze
 later lives here. Postgres is the queryable projection. If Postgres data
-ever gets corrupted or you need a new column, you can rebuild from R2.
+ever gets corrupted or you need a new column, you can rebuild from Tigris.
 
-R2 is S3-compatible, so use the `@aws-sdk/client-s3` package with the R2
-endpoint. Use multipart upload for `raw.jsonl` so the coordinator can flush
+Tigris is S3-compatible, so use the `@aws-sdk/client-s3` package with the
+Tigris endpoint. Use multipart upload for `raw.jsonl` so the coordinator can flush
 chunks every few seconds; this is what gives you the "partial results
 survive a crash" property.
 
@@ -424,7 +426,7 @@ Coordinator process.env (read at startup, never written to disk)
 
 Secrets stored in GitHub (most already exist for the daily benchmark):
 
-- `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`
+- `TIGRIS_STORAGE_ENDPOINT`, `TIGRIS_STORAGE_BUCKET`, `TIGRIS_STORAGE_ACCESS_KEY_ID`, `TIGRIS_STORAGE_SECRET_ACCESS_KEY`
 - `PG_URL` (full Postgres connection string including credentials)
 - Provider-specific env vars matching the existing convention in
   `src/sandbox/providers.ts` (e.g. `E2B_API_KEY`, `MODAL_TOKEN_ID` +
@@ -456,9 +458,9 @@ job directly:
    the Action is short enough that it almost always picks up immediately;
    the multi-hour work doesn't sit in any GitHub queue at all.
 3. **No GitHub-side log ingestion for the long-running part.** The
-   coordinator writes logs to local disk on the VM and to R2. You can SSH
+   coordinator writes logs to local disk on the VM and to Tigris. You can SSH
    into the VM (`nsc ssh <id>`) and `tail -f /root/run.log` at any time.
-4. **Durable partial results.** R2 multipart upload flushes every few
+4. **Durable partial results.** Tigris (S3) multipart upload flushes every few
    seconds. Postgres rows are batch-inserted every 1k. A coordinator crash
    loses seconds of in-flight data, not the whole run.
 5. **Stuck-run detection is one SQL query.** `SELECT * FROM runs WHERE
@@ -496,8 +498,8 @@ right Namespace tenant (one-time setup in the Namespace dashboard).
 
 - Postgres: `SELECT * FROM runs WHERE id = '<run_id>';` — status,
   heartbeat freshness, current counts.
-- R2: `aws s3 cp s3://<bucket>/<run_id>/heartbeat.json -` for the
-  in-flight summary.
+- Tigris: `aws --endpoint-url $TIGRIS_STORAGE_ENDPOINT s3 cp s3://<bucket>/<run_id>/heartbeat.json -`
+  for the in-flight summary.
 - VM: `nsc ssh <instance_id>` and `tail -f /root/run.log`.
 - Stop a run: `nsc ssh <instance_id> -- pkill -TERM node` (coordinator
   traps SIGTERM and flushes). Then `nsc destroy <instance_id>` if you
@@ -510,8 +512,8 @@ right Namespace tenant (one-time setup in the Namespace dashboard).
 1. **Coordinator local smoke test.** Write `src/burst-100k/coordinator.ts`
    and a first entry in `src/burst-100k/providers.ts` (start with one
    provider). Reuse the existing `@computesdk/<provider>` adapter package.
-   Add R2 and Postgres write paths. Run locally against N=100 sandboxes.
-   Verify rows land in Postgres and JSONL lands in R2.
+   Add Tigris and Postgres write paths. Run locally against N=100 sandboxes.
+   Verify rows land in Postgres and JSONL lands in Tigris.
 2. **Schema verification.** `psql "$PG_URL" -f db/burst-100k.sql` runs
    cleanly the first time and on re-runs. The launch script will do this
    automatically, but verify once by hand to confirm the file is correct.

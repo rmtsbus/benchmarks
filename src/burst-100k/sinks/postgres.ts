@@ -26,12 +26,12 @@ export class PostgresSink {
    * Idempotently create the 'running' row for this run. Safe to call even if
    * launch.sh has already inserted the row — ON CONFLICT DO NOTHING.
    */
-  async bootstrap(provider: string, commit_sha: string, instance_id: string, r2_prefix: string): Promise<void> {
+  async bootstrap(provider: string, commit_sha: string, instance_id: string, tigris_prefix: string): Promise<void> {
     await this.client.query(
-      `INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status, r2_prefix)
+      `INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status, tigris_prefix)
        VALUES ($1, $2, $3, $4, now(), 'running', $5)
        ON CONFLICT (id) DO NOTHING`,
-      [this.runId, provider, commit_sha, instance_id, r2_prefix],
+      [this.runId, provider, commit_sha, instance_id, tigris_prefix],
     );
   }
 

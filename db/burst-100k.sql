@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS runs (
   p50_latency_ms        INTEGER,
   p99_latency_ms        INTEGER,
   error_message         TEXT,                       -- populated on status='failed'
-  r2_prefix             TEXT NOT NULL               -- e.g. s3://<bucket>/<run_id>/
+  tigris_prefix         TEXT NOT NULL               -- e.g. s3://<bucket>/<run_id>/
 );
 
 CREATE INDEX IF NOT EXISTS runs_provider_started
