@@ -24,7 +24,7 @@ and [one-hundred-k-mvp-checklist.md](one-hundred-k-mvp-checklist.md).
 | Data | Approach | Why it's useful |
 | --- | --- | --- |
 | ~~Full latency histogram (p25, p75, p95, p99, p99.9, max)~~ ✅ Landed | `latency_distribution` object in Tigris `meta.json` carries count, min, p10/p25/p50/p75/p90/p95/p99/p999, max, mean. Postgres `runs` stays p50/p99-only — meta.json is the analytical view. | — |
-| **Error-type histogram** | Already in `sandbox_results`; just expose via SQL or add columns to `runs` (`timeouts_total`, `http_errors_total`, etc.) | Quick visibility on failure modes |
+| ~~Error-type histogram~~ ✅ Landed | New `timeouts`/`http_errors`/`network_errors` columns on Postgres `runs` (+ matching `error_histogram` object in Tigris `meta.json`). Counted live in the coordinator's `onResult`, no JOIN against `sandbox_results` needed for top-line stats. | — |
 | **Ramp-phase latency segments** (first 25% vs last 25% of starts) | Bucket `sandbox_results` rows by their `started_at` offset from `runs.started_at` | Does latency degrade as concurrency climbs? |
 | **Concurrency at each point in time** | Already computable from `started_at`/`completed_at` of `sandbox_results` | Validates the ramp actually behaved as configured |
 | **Sandbox IDs / region** if the adapter returns them | Add a `sandbox_id` (or `provider_metadata JSONB`) column on `sandbox_results`, extract from the sandbox object | Cross-reference against provider's own dashboards |
@@ -62,8 +62,9 @@ The high-value-to-cost ratio winners worth landing next:
    uploads on every heartbeat plus shutdown.
 2. ~~**Full latency histogram in `runs` and `meta.json`.**~~ ✅ Landed in Tigris
    `meta.json`; Postgres unchanged.
-3. **Error-type histogram column on `runs`** (or just a documented SQL
-   view) — `timeouts_total`, `http_errors_total`, `network_errors_total`.
+3. ~~**Error-type histogram column on `runs`**~~ ✅ Landed. `timeouts`,
+   `http_errors`, `network_errors` columns on `runs`; `error_histogram` in
+   `meta.json`.
 
 Everything else is on-demand based on what specific question is hard to
 answer with the current data.

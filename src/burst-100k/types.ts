@@ -31,6 +31,9 @@ export interface ProgressStats {
 export interface FinalStats {
   sandboxes_attempted: number;
   sandboxes_succeeded: number;
+  timeouts: number;
+  http_errors: number;
+  network_errors: number;
   p50_latency_ms: number;
   p99_latency_ms: number;
 }

@@ -103,10 +103,22 @@ export class PostgresSink {
            last_heartbeat = now(),
            sandboxes_attempted = $2,
            sandboxes_succeeded = $3,
-           p50_latency_ms = $4,
-           p99_latency_ms = $5
+           timeouts = $4,
+           http_errors = $5,
+           network_errors = $6,
+           p50_latency_ms = $7,
+           p99_latency_ms = $8
        WHERE id = $1`,
-      [this.runId, stats.sandboxes_attempted, stats.sandboxes_succeeded, stats.p50_latency_ms, stats.p99_latency_ms],
+      [
+        this.runId,
+        stats.sandboxes_attempted,
+        stats.sandboxes_succeeded,
+        stats.timeouts,
+        stats.http_errors,
+        stats.network_errors,
+        stats.p50_latency_ms,
+        stats.p99_latency_ms,
+      ],
     );
   }
 

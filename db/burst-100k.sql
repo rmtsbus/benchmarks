@@ -17,11 +17,21 @@ CREATE TABLE IF NOT EXISTS runs (
                         CHECK (status IN ('running', 'done', 'failed')),
   sandboxes_attempted   INTEGER,
   sandboxes_succeeded   INTEGER,
+  timeouts              INTEGER,                    -- count of sandbox_results.status='timeout'
+  http_errors           INTEGER,                    -- count of sandbox_results.status='http_error'
+  network_errors        INTEGER,                    -- count of sandbox_results.status='network_error'
   p50_latency_ms        INTEGER,
   p99_latency_ms        INTEGER,
   error_message         TEXT,                       -- populated on status='failed'
   tigris_prefix         TEXT NOT NULL               -- e.g. s3://<bucket>/<run_id>/
 );
+
+-- Idempotent column additions for already-existing tables (created before
+-- these columns existed). CREATE TABLE IF NOT EXISTS above only fires on
+-- a fresh DB; existing DBs need ALTER TABLE.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS timeouts       INTEGER;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS http_errors    INTEGER;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS network_errors INTEGER;
 
 CREATE INDEX IF NOT EXISTS runs_provider_started
   ON runs (provider, started_at DESC);

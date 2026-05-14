@@ -61,6 +61,7 @@ async function main() {
 
   let lastStats: ProgressStats = { done: 0, in_flight: 0, errors: 0 };
   const latencies: number[] = [];
+  const errorCounts = { timeout: 0, http_error: 0, network_error: 0 };
 
   // Periodically upload the coordinator's own stdout/stderr (redirected to a
   // file by launch.sh) to Tigris. Skipped silently when the env var is
@@ -109,7 +110,11 @@ async function main() {
   try {
     await runBurst(provider, compute, {
       async onResult(result) {
-        if (result.status === 'ok') latencies.push(result.latency_ms);
+        if (result.status === 'ok') {
+          latencies.push(result.latency_ms);
+        } else {
+          errorCounts[result.status]++;
+        }
         tigris.writeResult(result);
         await pg.write(result);
       },
@@ -127,8 +132,20 @@ async function main() {
     const final = {
       sandboxes_attempted: provider.concurrencyTarget,
       sandboxes_succeeded: latencies.length,
+      timeouts: errorCounts.timeout,
+      http_errors: errorCounts.http_error,
+      network_errors: errorCounts.network_error,
       p50_latency_ms: pct(0.5),
       p99_latency_ms: pct(0.99),
+    };
+
+    // Per-status counts for Tigris meta.json. Mirrors the FinalStats fields
+    // written to Postgres but uses the wire status names for clarity.
+    const error_histogram = {
+      ok: latencies.length,
+      timeout: errorCounts.timeout,
+      http_error: errorCounts.http_error,
+      network_error: errorCounts.network_error,
     };
 
     // Full latency distribution, written to Tigris meta.json only. Postgres
@@ -154,6 +171,7 @@ async function main() {
     await tigris.writeMeta({
       ...final,
       latency_distribution,
+      error_histogram,
       run_id: RUN_ID,
       provider: PROVIDER,
       ended_at: new Date().toISOString(),
