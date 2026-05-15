@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { getProvider } from './providers.js';
+import { log } from './logger.js';
 import { PostgresSink } from './sinks/postgres.js';
 import { TigrisSink } from './sinks/tigris.js';
 import { runBurst } from './runner.js';
@@ -33,24 +34,37 @@ async function main() {
   const override = process.env.CONCURRENCY_TARGET;
   if (override) {
     provider.concurrencyTarget = parseInt(override, 10);
-    console.log(`[coordinator] override CONCURRENCY_TARGET=${provider.concurrencyTarget}`);
   }
 
+  log.phase('burst-100k coordinator starting');
+  log.info(`run_id=${RUN_ID}`);
+  log.info(`provider=${PROVIDER} (requires: ${provider.requiredEnvVars.join(', ') || 'none'})`);
+  log.info(`concurrency=${provider.concurrencyTarget} ramp=${provider.rampSeconds}s timeout=${provider.perRequestTimeoutMs ?? 120_000}ms`);
+  log.info(`commit_sha=${commit_sha} instance_id=${instance_id}`);
+  log.info(`tigris_prefix=${tigris_prefix}`);
+  if (override) log.info(`(CONCURRENCY_TARGET overridden via env)`);
+
   // Validate provider-specific requiredEnvVars
+  log.phase('validating environment');
   const missing = provider.requiredEnvVars.filter(v => !process.env[v]);
   if (missing.length > 0) {
     const msg = `Missing required env vars for ${PROVIDER}: ${missing.join(', ')}`;
-    console.error(`[coordinator] ${msg}`);
+    log.error(msg);
     await tryRecordFailure(PG_URL, RUN_ID, msg);
     process.exit(1);
   }
+  log.ok(`all ${provider.requiredEnvVars.length} provider env var(s) present`);
 
-  console.log(`[coordinator] run_id=${RUN_ID} provider=${PROVIDER} concurrency=${provider.concurrencyTarget} ramp=${provider.rampSeconds}s`);
-
+  log.phase('opening sinks');
+  log.info('Postgres: connecting…');
   const pg = new PostgresSink(PG_URL, RUN_ID);
   await pg.connect();
+  log.ok('Postgres: connected');
+  log.info('Postgres: bootstrapping runs row (idempotent)');
   await pg.bootstrap(PROVIDER, commit_sha, instance_id, tigris_prefix);
+  log.ok('Postgres: runs row in place');
 
+  log.info('Tigris: opening multipart upload for raw.jsonl');
   const tigris = new TigrisSink(
     {
       endpoint: TIGRIS_STORAGE_ENDPOINT,
@@ -60,6 +74,7 @@ async function main() {
     },
     RUN_ID,
   );
+  log.ok('Tigris: sink ready');
 
   let lastStats: ProgressStats = { done: 0, in_flight: 0, errors: 0 };
   // Track {idx, ms} for ok sandboxes so we can bucket by ramp position at
@@ -80,7 +95,7 @@ async function main() {
       const content = await fs.promises.readFile(COORDINATOR_LOG_PATH, 'utf-8');
       await tigris.writeLog(content);
     } catch (err: any) {
-      console.error('[log-upload]', err?.message ?? err);
+      log.warn(`log-upload failed: ${err?.message ?? err}`);
     }
   };
 
@@ -144,20 +159,20 @@ async function main() {
 
   const heartbeat = setInterval(() => {
     const ts = new Date().toISOString();
-    pg.heartbeat(lastStats).catch(err => console.error('[heartbeat:pg]', err.message));
-    tigris.writeHeartbeat({ ...lastStats, ts }).catch(err => console.error('[heartbeat:tigris]', err.message));
+    pg.heartbeat(lastStats).catch(err => log.warn(`heartbeat:pg ${err.message}`));
+    tigris.writeHeartbeat({ ...lastStats, ts }).catch(err => log.warn(`heartbeat:tigris ${err.message}`));
     uploadLog();
     if (metricsSamples.length > 0) {
-      tigris.writeMetrics(metricsSamples).catch(err => console.error('[heartbeat:metrics]', err.message));
+      tigris.writeMetrics(metricsSamples).catch(err => log.warn(`heartbeat:metrics ${err.message}`));
     }
-    console.log(`[heartbeat] done=${lastStats.done} in_flight=${lastStats.in_flight} errors=${lastStats.errors}`);
+    log.stat(`heartbeat done=${lastStats.done}/${provider.concurrencyTarget} in_flight=${lastStats.in_flight} errors=${lastStats.errors}`);
   }, HEARTBEAT_INTERVAL_MS);
 
   let shuttingDown = false;
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[coordinator] ${signal} received; flushing...`);
+    log.phase(`${signal} received — flushing`);
     clearInterval(heartbeat);
     clearInterval(metricsInterval);
     try {
@@ -167,17 +182,21 @@ async function main() {
       await pg.close();
       await uploadLog();
       if (metricsSamples.length > 0) await tigris.writeMetrics(metricsSamples);
+      log.ok('flushed all sinks');
     } catch (e: any) {
-      console.error('[coordinator] shutdown flush failed:', e?.message ?? e);
+      log.error(`shutdown flush failed: ${e?.message ?? e}`);
     }
     process.exit(1);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  log.phase('initializing compute client');
   const compute = provider.createCompute();
+  log.ok(`compute client ready for ${PROVIDER}`);
 
   try {
+    log.phase(`burst — firing ${provider.concurrencyTarget} requests (ramp ${provider.rampSeconds}s)`);
     await runBurst(provider, compute, {
       async onResult(result) {
         if (result.status === 'ok') {
@@ -338,9 +357,14 @@ async function main() {
       total_cpu_system_us: metricsSamples[metricsSamples.length - 1].cpu_system_us,
     };
 
+    log.phase('flushing sinks and writing summary');
+    log.info('Postgres: flushing remaining sandbox_results batch');
     await pg.flush();
+    log.info('Tigris: closing multipart upload for raw.jsonl');
     await tigris.close();
+    log.info('Tigris: writing metrics.jsonl');
     await tigris.writeMetrics(metricsSamples);
+    log.info('Tigris: writing meta.json');
     await tigris.writeMeta({
       ...final,
       latency_distribution,
@@ -353,16 +377,23 @@ async function main() {
       provider: PROVIDER,
       ended_at: new Date().toISOString(),
     });
+    log.info('Postgres: marking run done with final stats');
     await pg.complete(final);
     await pg.close();
 
-    console.log('[coordinator] run complete:', final);
+    log.phase('run complete');
+    log.ok(`${final.sandboxes_succeeded}/${final.sandboxes_attempted} succeeded ` +
+      `(${((final.sandboxes_succeeded / final.sandboxes_attempted) * 100).toFixed(1)}%)`);
+    log.info(`latency p50=${final.p50_latency_ms}ms p99=${final.p99_latency_ms}ms`);
+    if (final.timeouts + final.http_errors + final.network_errors > 0) {
+      log.warn(`errors: timeouts=${final.timeouts} http_errors=${final.http_errors} network_errors=${final.network_errors}`);
+    }
     // Final log upload AFTER the completion message so it ends up in Tigris.
     await uploadLog();
   } catch (err: any) {
     clearInterval(heartbeat);
     clearInterval(metricsInterval);
-    console.error('[coordinator] run failed:', err?.message ?? err);
+    log.error(`run failed: ${err?.message ?? err}`);
     try {
       await pg.flush();
       await tigris.close();
@@ -371,7 +402,7 @@ async function main() {
       await uploadLog();
       if (metricsSamples.length > 0) await tigris.writeMetrics(metricsSamples);
     } catch (e: any) {
-      console.error('[coordinator] failed to record failure:', e?.message ?? e);
+      log.error(`failed to record failure: ${e?.message ?? e}`);
     }
     process.exit(1);
   }
@@ -380,7 +411,7 @@ async function main() {
 function required(name: string): string {
   const v = process.env[name];
   if (!v) {
-    console.error(`[coordinator] missing required env var: ${name}`);
+    log.error(`missing required env var: ${name}`);
     process.exit(1);
   }
   return v;
@@ -393,11 +424,11 @@ async function tryRecordFailure(pgUrl: string, runId: string, message: string): 
     await pg.fail(message);
     await pg.close();
   } catch (e: any) {
-    console.error('[coordinator] could not write failure row:', e?.message ?? e);
+    log.error(`could not write failure row: ${e?.message ?? e}`);
   }
 }
 
 main().catch(err => {
-  console.error('[coordinator] crashed:', err);
+  log.error(`crashed: ${err?.stack ?? err}`);
   process.exit(1);
 });

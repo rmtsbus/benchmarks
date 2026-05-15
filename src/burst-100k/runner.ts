@@ -1,4 +1,5 @@
 import pLimit from 'p-limit';
+import { log, pickSamplingPeriod } from './logger.js';
 import type { BurstProviderConfig, SandboxResult, SandboxResultStatus, ProgressStats } from './types.js';
 
 export interface RunnerCallbacks {
@@ -27,6 +28,14 @@ export async function runBurst(
   let in_flight = 0;
   let errors = 0;
   const startTime = Date.now();
+
+  // Per-sandbox log sampling so coordinator.log stays bounded at high N.
+  // At N=100 every sandbox is logged; at N=100k roughly every 1000th is
+  // logged plus every error.
+  const samplingPeriod = pickSamplingPeriod(concurrencyTarget);
+  // Milestone progress lines every ~10% of work done.
+  const progressStep = Math.max(1, Math.floor(concurrencyTarget / 10));
+  let nextProgressMilestone = progressStep;
 
   const tasks: Promise<void>[] = [];
   for (let idx = 0; idx < concurrencyTarget; idx++) {
@@ -69,6 +78,33 @@ export async function runBurst(
         done++;
         try { await callbacks.onResult(result); } catch (e) { /* swallow */ }
         callbacks.onProgress({ done, in_flight, errors });
+
+        // Per-sandbox log line — always for errors; for ok, only if this idx
+        // falls on the sampling period or it's the very last one.
+        if (result.status === 'ok') {
+          if (idx % samplingPeriod === 0 || done === concurrencyTarget) {
+            const sb = result.provider_metadata?.sandboxId
+              ? ` — sandboxId=${result.provider_metadata.sandboxId}`
+              : '';
+            log.ok(`sandbox ${idx} created in ${result.latency_ms}ms${sb}`);
+          }
+        } else {
+          log.error(`sandbox ${idx} ${result.status} (http=${result.http_status ?? '-'} ` +
+            `code=${result.error_code ?? '-'}): ${result.error_message ?? '(no message)'}`);
+        }
+
+        // Milestone progress lines (~10% increments)
+        if (done >= nextProgressMilestone && done < concurrencyTarget) {
+          const elapsedMs = Date.now() - startTime;
+          const rate = done / (elapsedMs / 1000);
+          const etaSec = (concurrencyTarget - done) / Math.max(rate, 0.001);
+          log.stat(
+            `progress ${done}/${concurrencyTarget} ` +
+            `(in_flight=${in_flight} errors=${errors}) ` +
+            `rate=${rate.toFixed(1)}/s eta≈${etaSec.toFixed(0)}s`,
+          );
+          nextProgressMilestone += progressStep;
+        }
 
         // Fire-and-forget destroy. The sandbox auto-destroys on its own
         // timeoutMs too; this is just a courtesy cleanup.
