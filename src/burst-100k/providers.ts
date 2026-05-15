@@ -1,3 +1,4 @@
+import { declaw } from '@computesdk/declaw';
 import { e2b } from '@computesdk/e2b';
 import { modal } from '@computesdk/modal';
 import { runloop } from '@computesdk/runloop';
@@ -48,6 +49,14 @@ export const providers: BurstProviderConfig[] = [
     name: 'tensorlake',
     requiredEnvVars: ['TENSORLAKE_API_KEY'],
     createCompute: () => tensorlake({ apiKey: process.env.TENSORLAKE_API_KEY! }),
+    concurrencyTarget: 100_000,
+    rampSeconds: 60,
+    perRequestTimeoutMs: 120_000,
+  },
+  {
+    name: 'declaw',
+    requiredEnvVars: ['DECLAW_API_KEY'],
+    createCompute: () => declaw({ apiKey: process.env.DECLAW_API_KEY! }),
     concurrencyTarget: 100_000,
     rampSeconds: 60,
     perRequestTimeoutMs: 120_000,
