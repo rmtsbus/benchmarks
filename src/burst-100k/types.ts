@@ -7,12 +7,32 @@ export interface BurstProviderConfig extends ProviderConfig {
   perRequestTimeoutMs?: number;
 }
 
-export type SandboxResultStatus = 'ok' | 'timeout' | 'http_error' | 'network_error';
+/**
+ * Final lifecycle status of a sandbox in the burst:
+ *   success           — created, readiness `node -v` passed, end-of-test
+ *                       liveness `node -v` also passed (alive when we
+ *                       destroyed everything).
+ *   partial           — created, readiness passed, but end-of-test liveness
+ *                       failed (died between create and the coordinated
+ *                       destroy).
+ *   readiness_failed  — created, but the first `node -v` after create failed
+ *                       so the sandbox never became usable. Destroyed early.
+ *   failed            — `sandbox.create()` itself errored.
+ */
+export type SandboxResultStatus = 'success' | 'partial' | 'readiness_failed' | 'failed';
+
+/**
+ * Sub-classification of the underlying error for any non-success status.
+ * For `failed`, describes how create errored. For `readiness_failed` and
+ * `partial`, describes how the `node -v` probe errored.
+ */
+export type FailureClass = 'timeout' | 'http_error' | 'network_error';
 
 export interface SandboxResult {
   sandbox_idx: number;
-  started_at: string;        // ISO-8601
-  completed_at: string;      // ISO-8601
+  started_at: string;        // ISO-8601 — when we called sandbox.create()
+  completed_at: string;      // ISO-8601 — when this sandbox's lifecycle ended
+                             //            (destroy or detected death)
   /**
    * "Allocate" phase: time for `sandbox.create()` to resolve.
    * Named `latency_ms` for backward-compat with older runs/queries.
@@ -27,6 +47,8 @@ export interface SandboxResult {
    */
   first_command_ms: number | null;
   status: SandboxResultStatus;
+  /** Set whenever status != 'success'. Null on success. */
+  failure_class: FailureClass | null;
   http_status: number | null;
   error_code: string | null;
   error_message: string | null;
@@ -65,10 +87,19 @@ export interface MetricsSample {
 
 export interface FinalStats {
   sandboxes_attempted: number;
+  /** count of status='success' */
   sandboxes_succeeded: number;
+  /** count of status='partial' (created, died before end-of-test) */
+  partials: number;
+  /** count of status='readiness_failed' (created, first `node -v` failed) */
+  readiness_failures: number;
+  /** count of status='failed' (create itself errored) */
+  failures: number;
+  /** sub-classification of create-failures (sums to `failures`) */
   timeouts: number;
   http_errors: number;
   network_errors: number;
+  /** allocate-phase latency percentiles, over status='success' only */
   p50_latency_ms: number;
   p99_latency_ms: number;
 }

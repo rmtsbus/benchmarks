@@ -77,14 +77,21 @@ async function main() {
   log.ok('Tigris: sink ready');
 
   let lastStats: ProgressStats = { done: 0, in_flight: 0, errors: 0 };
-  // Track per-ok-sandbox phase timings for the analytical outputs.
+  // Track per-success-sandbox phase timings for the analytical outputs.
   //   ms                = allocate phase (sandbox.create() time, == latency_ms)
   //   first_command_ms  = readiness phase (`node -v` after create); null when cmd failed
+  // Only fully-successful sandboxes contribute to the latency distributions —
+  // a `partial` sandbox's create may have been fast but the sandbox died
+  // mid-test, so its timings would skew the headline number.
   const okResults: Array<{ idx: number; ms: number; first_command_ms: number | null }> = [];
   // Track every sandbox's start/end (epoch ms) — including errors — so we
   // can reconstruct concurrency-over-time after the burst.
   const intervals: Array<{ start: number; end: number }> = [];
-  const errorCounts = { timeout: 0, http_error: 0, network_error: 0 };
+  // Counts per final status. `failure_class` (timeout/http_error/network_error)
+  // is tracked separately so it works across all non-success statuses.
+  const statusCounts = { success: 0, partial: 0, readiness_failed: 0, failed: 0 };
+  // Sub-classification of create-failures only (status === 'failed').
+  const createFailureClass = { timeout: 0, http_error: 0, network_error: 0 };
 
   // Periodically upload the coordinator's own stdout/stderr (redirected to a
   // file by launch.sh) to Tigris. Skipped silently when the env var is
@@ -200,14 +207,15 @@ async function main() {
     log.phase(`burst — firing ${provider.concurrencyTarget} requests at t=0 (no stagger)`);
     await runBurst(provider, compute, {
       async onResult(result) {
-        if (result.status === 'ok') {
+        statusCounts[result.status]++;
+        if (result.status === 'success') {
           okResults.push({
             idx: result.sandbox_idx,
             ms: result.latency_ms,
             first_command_ms: result.first_command_ms,
           });
-        } else {
-          errorCounts[result.status]++;
+        } else if (result.status === 'failed' && result.failure_class) {
+          createFailureClass[result.failure_class]++;
         }
         intervals.push({
           start: Date.parse(result.started_at),
@@ -229,21 +237,30 @@ async function main() {
 
     const final = {
       sandboxes_attempted: provider.concurrencyTarget,
-      sandboxes_succeeded: latencies.length,
-      timeouts: errorCounts.timeout,
-      http_errors: errorCounts.http_error,
-      network_errors: errorCounts.network_error,
+      sandboxes_succeeded: statusCounts.success,
+      partials: statusCounts.partial,
+      readiness_failures: statusCounts.readiness_failed,
+      failures: statusCounts.failed,
+      timeouts: createFailureClass.timeout,
+      http_errors: createFailureClass.http_error,
+      network_errors: createFailureClass.network_error,
       p50_latency_ms: pct(0.5),
       p99_latency_ms: pct(0.99),
     };
 
-    // Per-status counts for Tigris meta.json. Mirrors the FinalStats fields
-    // written to Postgres but uses the wire status names for clarity.
-    const error_histogram = {
-      ok: latencies.length,
-      timeout: errorCounts.timeout,
-      http_error: errorCounts.http_error,
-      network_error: errorCounts.network_error,
+    // Per-status counts for Tigris meta.json. Uses the wire status names so
+    // the four-state taxonomy is visible at-a-glance in raw output.
+    const status_histogram = {
+      success: statusCounts.success,
+      partial: statusCounts.partial,
+      readiness_failed: statusCounts.readiness_failed,
+      failed: statusCounts.failed,
+    };
+    // Sub-classification of create-failures only (sums to status_histogram.failed).
+    const create_failure_class = {
+      timeout: createFailureClass.timeout,
+      http_error: createFailureClass.http_error,
+      network_error: createFailureClass.network_error,
     };
 
     // Full latency distribution, written to Tigris meta.json only. Postgres
@@ -391,7 +408,8 @@ async function main() {
       latency_distribution,
       first_command_distribution,
       tti_distribution,
-      error_histogram,
+      status_histogram,
+      create_failure_class,
       submission_segments,
       concurrency_summary,
       concurrency_timeline,
@@ -406,10 +424,11 @@ async function main() {
 
     log.phase('run complete');
     log.ok(`${final.sandboxes_succeeded}/${final.sandboxes_attempted} succeeded ` +
-      `(${((final.sandboxes_succeeded / final.sandboxes_attempted) * 100).toFixed(1)}%)`);
+      `(${((final.sandboxes_succeeded / final.sandboxes_attempted) * 100).toFixed(1)}%) ` +
+      `partial=${final.partials} readiness_failed=${final.readiness_failures} failed=${final.failures}`);
     log.info(`latency p50=${final.p50_latency_ms}ms p99=${final.p99_latency_ms}ms`);
     if (final.timeouts + final.http_errors + final.network_errors > 0) {
-      log.warn(`errors: timeouts=${final.timeouts} http_errors=${final.http_errors} network_errors=${final.network_errors}`);
+      log.warn(`create-failure class: timeouts=${final.timeouts} http_errors=${final.http_errors} network_errors=${final.network_errors}`);
     }
     // Final log upload AFTER the completion message so it ends up in Tigris.
     await uploadLog();
