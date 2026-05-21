@@ -11,11 +11,17 @@ import type { BurstProviderConfig } from './types.js';
  * A provider participates iff it has an entry here. This mirrors the
  * convention in src/sandbox/providers.ts; presence is the opt-in signal.
  *
- * `sandboxOptions.timeoutMs` is the per-sandbox keep-alive (when the
- * provider's SDK supports the option). The two-phase runner holds every
- * sandbox alive between create and the coordinated end-of-test destroy,
- * so this value must comfortably exceed the worst-case burst duration
- * (perRequestTimeoutMs + phase-2 liveness sweep). 30min is conservative.
+ * `sandboxOptions.timeout` (in ms) is the per-sandbox keep-alive. This is
+ * the canonical field name across the @computesdk/* adapters — each adapter
+ * destructures `options.timeout` and maps it to the provider's native field
+ * (e2b → timeoutMs, runloop/declaw/tensorlake → seconds, etc.). The
+ * two-phase runner holds every sandbox alive between create and the
+ * coordinated end-of-test destroy, so this value must comfortably exceed
+ * the worst-case burst duration. 30min is conservative.
+ *
+ * Modal is the exception: its adapter ignores `timeout` and uses whatever
+ * default it applies. If that's shorter than the burst, modal sandboxes
+ * will auto-destroy mid-test and be counted as partial.
  */
 const KEEP_ALIVE_MS = 30 * 60_000;
 
@@ -26,7 +32,7 @@ export const providers: BurstProviderConfig[] = [
     createCompute: () => e2b({ apiKey: process.env.E2B_API_KEY! }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    sandboxOptions: { timeoutMs: KEEP_ALIVE_MS },
+    sandboxOptions: { timeout: KEEP_ALIVE_MS },
   },
   {
     name: 'modal',
@@ -37,9 +43,6 @@ export const providers: BurstProviderConfig[] = [
     }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    // Modal's adapter doesn't currently expose a sandbox-level timeoutMs.
-    // The default sandbox lifetime must accommodate the full burst — if it
-    // doesn't, sandboxes will auto-destroy mid-test and be counted as partial.
   },
   {
     name: 'runloop',
@@ -47,7 +50,7 @@ export const providers: BurstProviderConfig[] = [
     createCompute: () => runloop({ apiKey: process.env.RUNLOOP_API_KEY! }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    sandboxOptions: { timeoutMs: KEEP_ALIVE_MS },
+    sandboxOptions: { timeout: KEEP_ALIVE_MS },
   },
   {
     name: 'tensorlake',
@@ -55,7 +58,7 @@ export const providers: BurstProviderConfig[] = [
     createCompute: () => tensorlake({ apiKey: process.env.TENSORLAKE_API_KEY! }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    sandboxOptions: { timeoutMs: KEEP_ALIVE_MS },
+    sandboxOptions: { timeout: KEEP_ALIVE_MS },
   },
   {
     name: 'declaw',
@@ -63,7 +66,7 @@ export const providers: BurstProviderConfig[] = [
     createCompute: () => declaw({ apiKey: process.env.DECLAW_API_KEY! }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    sandboxOptions: { timeoutMs: KEEP_ALIVE_MS },
+    sandboxOptions: { timeout: KEEP_ALIVE_MS },
   },
 ];
 
