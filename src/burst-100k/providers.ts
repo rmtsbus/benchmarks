@@ -67,7 +67,7 @@ export const providers: BurstProviderConfig[] = [
     createCompute: () => tensorlake({ apiKey: process.env.TENSORLAKE_API_KEY! }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    sandboxOptions: { timeout: KEEP_ALIVE_MS },
+    sandboxOptions: { timeout: KEEP_ALIVE_MS, cpus: 0.25, memory_mb: 100, ephemeralDiskMb: 100 },
   },
   {
     name: 'declaw',
