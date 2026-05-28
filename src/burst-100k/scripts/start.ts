@@ -2,12 +2,10 @@
 /**
  * Launcher for the burst-100k benchmark.
  *
- * Spreads a single logical burst of N sandboxes across K Namespace VMs by
- * provisioning K VMs in parallel — each with CONCURRENCY_TARGET = N/K, tagged
- * with a shared GROUP_ID + per-VM SHARD_INDEX. A single-VM run is just
- * `--vms 1` (the default). Each VM provisions, uploads the coordinator bundle,
- * records its run in Postgres, and starts the coordinator detached; this script
- * lives for ~30s while the multi-hour benchmark continues on the VMs.
+ * Spreads a single logical burst of N sandboxes across K Namespace VM-backed
+ * containers by launching K `nsc run --image ...` jobs in parallel — each with
+ * CONCURRENCY_TARGET = N/K, tagged with a shared GROUP_ID + per-VM
+ * SHARD_INDEX. A single-VM run is just `--vms 1` (the default).
  *
  * Each VM ends up as its own `runs` row in Postgres; combine shards after the
  * fact with:
@@ -32,10 +30,8 @@
  */
 
 import 'dotenv/config';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { execSync } from 'node:child_process';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -59,15 +55,6 @@ const PROVIDER_SECRET_VARS = [
 const MACHINE_TYPE_DEFAULT = '16x32';
 
 // ----- helpers --------------------------------------------------------------
-
-/**
- * POSIX single-quote escaping for embedding values in the `/root/start.sh`
- * body, which runs under BusyBox `sh` on the Wolfi `--bare` image. Wrap in
- * single quotes and replace each `'` with `'\''`. Replaces bash `printf '%q'`.
- */
-function shQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 type Logger = (line: string) => void;
 
@@ -128,6 +115,7 @@ function utcStamp(): string {
 
 interface Args {
   provider: string;
+  image: string;
   total: number;
   vms: number;
   duration: string;
@@ -141,6 +129,7 @@ function usage(): string {
     '',
     'Required:',
     '  --provider <name>, -p  Provider name (e2b, modal, runloop, ...)',
+    '  --image <ref>,  -i     Container image to run with `nsc run`',
     '  --total <n>,    -t     Total concurrent sandboxes across all VMs',
     '',
     'Optional:',
@@ -152,7 +141,7 @@ function usage(): string {
     '  --help, -h             Print this help',
     '',
     'Examples:',
-    '  npm run bench:burst-100k:start -- --provider e2b --total 100000 --vms 20',
+    '  npm run bench:burst-100k:start -- --provider e2b --image <ref> --total 100000 --vms 20',
     '  tsx src/burst-100k/scripts/start.ts -p e2b -t 1000 -v 1 --duration 30m',
   ].join('\n');
 }
@@ -168,6 +157,7 @@ function parseArgs(): Args {
       return v;
     };
     if (a === '--provider' || a === '-p') out.provider = next();
+    else if (a === '--image' || a === '-i') out.image = next();
     else if (a === '--total' || a === '-t') out.total = parseInt(next(), 10);
     else if (a === '--vms' || a === '-v') out.vms = parseInt(next(), 10);
     else if (a === '--duration') out.duration = next();
@@ -177,6 +167,7 @@ function parseArgs(): Args {
     else { console.error(`unknown arg: ${a}\n${usage()}`); process.exit(2); }
   }
   if (!out.provider) { console.error(`--provider is required\n${usage()}`); process.exit(2); }
+  if (!out.image) { console.error(`--image is required\n${usage()}`); process.exit(2); }
   if (!Number.isFinite(out.total) || (out.total as number) <= 0) {
     console.error(`--total must be a positive integer\n${usage()}`); process.exit(2);
   }
@@ -194,6 +185,7 @@ function parseArgs(): Args {
 
 interface ShardOpts {
   provider: string;
+  image: string;
   runId: string;
   concurrencyTarget: number;
   duration: string;
@@ -208,97 +200,80 @@ interface ShardOpts {
 interface ShardResult { shard: number; runId: string; rc: number; }
 
 /**
- * Build the `/root/start.sh` body executed on the VM. POSIX `sh` only (BusyBox
- * on Wolfi). Values are shell-quoted with shQuote so unusual characters in
- * secrets/URLs survive.
- */
-function buildStartupScript(opts: ShardOpts, instanceId: string): string {
-  const exports: string[] = [
-    `export RUN_ID=${shQuote(opts.runId)}`,
-    `export PROVIDER=${shQuote(opts.provider)}`,
-    `export INSTANCE_ID=${shQuote(instanceId)}`,
-    `export GITHUB_SHA=${shQuote(opts.githubSha)}`,
-    `export PG_URL=${shQuote(process.env.PG_URL!)}`,
-    `export TIGRIS_STORAGE_ENDPOINT=${shQuote(process.env.TIGRIS_STORAGE_ENDPOINT!)}`,
-    `export TIGRIS_STORAGE_BUCKET=${shQuote(process.env.TIGRIS_STORAGE_BUCKET!)}`,
-    `export TIGRIS_STORAGE_ACCESS_KEY_ID=${shQuote(process.env.TIGRIS_STORAGE_ACCESS_KEY_ID!)}`,
-    `export TIGRIS_STORAGE_SECRET_ACCESS_KEY=${shQuote(process.env.TIGRIS_STORAGE_SECRET_ACCESS_KEY!)}`,
-    // Where the coordinator reads its own process log for periodic Tigris
-    // upload; we tee node's output here while keeping stdout for Namespace logs.
-    `export COORDINATOR_LOG_PATH=/root/run.log`,
-    `export CONCURRENCY_TARGET=${shQuote(String(opts.concurrencyTarget))}`,
-  ];
-  for (const v of PROVIDER_SECRET_VARS) {
-    const val = process.env[v];
-    if (val) exports.push(`export ${v}=${shQuote(val)}`);
-  }
-  if (opts.groupId !== undefined && opts.shardIndex !== undefined && opts.shardCount !== undefined) {
-    exports.push(`export GROUP_ID=${shQuote(opts.groupId)}`);
-    exports.push(`export SHARD_INDEX=${shQuote(String(opts.shardIndex))}`);
-    exports.push(`export SHARD_COUNT=${shQuote(String(opts.shardCount))}`);
-  }
-  return [
-    '#!/bin/sh',
-    'set -e',
-    ...exports,
-    'ulimit -n 200000',
-    // Detach and duplicate output: keep stdout/stderr for Namespace logs while
-    // also writing /root/run.log for periodic Tigris upload. Wrap in `sh -c`
-    // so nohup applies to the whole pipeline rather than only `node`.
-    'nohup sh -c "node /root/coordinator.cjs 2>&1 | tee -a /root/run.log" </dev/null &',
-    'rm -f -- "$0"   # self-destruct so creds never linger on disk',
-    '',
-  ].join('\n');
-}
-
 /**
- * Provision one Namespace VM and start the coordinator on it: create instance,
- * upload bundle, record the run in Postgres, install node, start the
- * coordinator detached, then confirm it's running. Never throws — resolves with
- * rc so a failed shard doesn't take down its siblings.
+ * Start one shard as a native Namespace container (`nsc run --image ...`) and
+ * record the corresponding `runs` row in Postgres. Never throws — resolves
+ * with rc so a failed shard doesn't take down its siblings.
  */
 async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<ShardResult> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burst-100k-'));
-  const cidFile = path.join(tmpDir, 'cid');
-  const startFile = path.join(tmpDir, 'start.sh');
   let client: InstanceType<typeof Client> | null = null;
   try {
-    // 1. provision instance
-    log(`creating Namespace instance (machine=${opts.machineType} duration=${opts.duration})`);
-    const create = await sh('nsc', [
-      'create', '--bare',
+    // 1. run image as a Namespace containerized job
+    log(`starting container (image=${opts.image} machine=${opts.machineType} duration=${opts.duration})`);
+    const runArgs = [
+      'run',
+      '--image', opts.image,
       '--machine_type', opts.machineType,
       '--duration', opts.duration,
-      '--cidfile', cidFile,
-    ], { log });
-    if (create.code !== 0 || !fs.existsSync(cidFile)) {
-      log(`ERROR: nsc create failed (rc=${create.code})`);
+      '--name', opts.runId,
+      '--wait',
+      '-o', 'json',
+      '--env', `RUN_ID=${opts.runId}`,
+      '--env', `PROVIDER=${opts.provider}`,
+      '--env', `GITHUB_SHA=${opts.githubSha}`,
+      '--env', `PG_URL=${process.env.PG_URL!}`,
+      '--env', `TIGRIS_STORAGE_ENDPOINT=${process.env.TIGRIS_STORAGE_ENDPOINT!}`,
+      '--env', `TIGRIS_STORAGE_BUCKET=${process.env.TIGRIS_STORAGE_BUCKET!}`,
+      '--env', `TIGRIS_STORAGE_ACCESS_KEY_ID=${process.env.TIGRIS_STORAGE_ACCESS_KEY_ID!}`,
+      '--env', `TIGRIS_STORAGE_SECRET_ACCESS_KEY=${process.env.TIGRIS_STORAGE_SECRET_ACCESS_KEY!}`,
+      '--env', `CONCURRENCY_TARGET=${opts.concurrencyTarget}`,
+    ];
+    if (opts.groupId !== undefined && opts.shardIndex !== undefined && opts.shardCount !== undefined) {
+      runArgs.push('--env', `GROUP_ID=${opts.groupId}`);
+      runArgs.push('--env', `SHARD_INDEX=${opts.shardIndex}`);
+      runArgs.push('--env', `SHARD_COUNT=${opts.shardCount}`);
+    }
+    for (const v of PROVIDER_SECRET_VARS) {
+      const val = process.env[v];
+      if (val) runArgs.push('--env', `${v}=${val}`);
+    }
+    const run = await sh('nsc', runArgs, { log, capture: true });
+    if (run.code !== 0) {
+      log(`ERROR: nsc run failed (rc=${run.code})`);
       return { shard, runId: opts.runId, rc: 1 };
     }
-    const instanceId = fs.readFileSync(cidFile, 'utf8').trim();
+
+    let instanceId = '';
+    try {
+      const payload = JSON.parse(run.stdout);
+      instanceId = String(payload.instance_id ?? payload.cluster_id ?? '').trim();
+    } catch {
+      // fallthrough
+    }
+    if (!instanceId) {
+      log('ERROR: could not parse instance_id from nsc run output');
+      return { shard, runId: opts.runId, rc: 1 };
+    }
     log(`instance: ${instanceId}`);
 
-    // 2. upload coordinator bundle
-    log('uploading coordinator bundle');
-    const up = await sh('nsc', [
-      'instance', 'upload', instanceId, 'dist/burst-100k.cjs', '/root/coordinator.cjs',
-    ], { log });
-    if (up.code !== 0) { log(`ERROR: bundle upload failed (rc=${up.code})`); return { shard, runId: opts.runId, rc: 1 }; }
-
-    // 3. record run in Postgres BEFORE handing off. The coordinator UPSERTs the
-    // same row on startup; this INSERT exists so the run is recorded even if the
-    // SSH hand-off below fails. Parameterized via pg so NULLs (absent sharded
-    // metadata) and arbitrary values are handled natively. The connection is
-    // kept open and reused for the confirmation poll in step 6.
+    // 2. record run in Postgres. Upsert to ensure the canonical instance_id from
+    // nsc run wins if the coordinator has already inserted a bootstrap row.
     log('recording run in Postgres');
     client = new Client({ connectionString: process.env.PG_URL });
     try {
       await client.connect();
       await client.query(
         `INSERT INTO runs (id, provider, commit_sha, instance_id, started_at, status,
-                           tigris_prefix, group_id, shard_index, shard_count)
+                            tigris_prefix, group_id, shard_index, shard_count)
          VALUES ($1, $2, $3, $4, now(), 'running', $5, $6, $7, $8)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO UPDATE
+           SET provider = EXCLUDED.provider,
+               commit_sha = EXCLUDED.commit_sha,
+               instance_id = EXCLUDED.instance_id,
+               tigris_prefix = EXCLUDED.tigris_prefix,
+               group_id = COALESCE(runs.group_id, EXCLUDED.group_id),
+               shard_index = COALESCE(runs.shard_index, EXCLUDED.shard_index),
+               shard_count = COALESCE(runs.shard_count, EXCLUDED.shard_count)`,
         [
           opts.runId, opts.provider, opts.githubSha, instanceId,
           `s3://${process.env.TIGRIS_STORAGE_BUCKET}/${opts.runId}/`,
@@ -310,25 +285,12 @@ async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<S
       return { shard, runId: opts.runId, rc: 1 };
     }
 
-    // 4. prepare VM: Wolfi --bare has no node, install it.
-    log('installing nodejs on VM');
-    const apk = await sh('nsc', ['ssh', instanceId, '--', 'apk', 'add', '-q', 'nodejs'], { log });
-    if (apk.code !== 0) { log(`ERROR: apk add nodejs failed (rc=${apk.code})`); return { shard, runId: opts.runId, rc: 1 }; }
-
-    // 5. upload + run the startup script (detaches the coordinator).
-    fs.writeFileSync(startFile, buildStartupScript(opts, instanceId), { mode: 0o600 });
-    log('starting coordinator detached');
-    const upStart = await sh('nsc', ['instance', 'upload', instanceId, startFile, '/root/start.sh'], { log });
-    if (upStart.code !== 0) { log(`ERROR: start.sh upload failed (rc=${upStart.code})`); return { shard, runId: opts.runId, rc: 1 }; }
-    await sh('nsc', ['ssh', instanceId, '--', 'chmod', '600', '/root/start.sh'], { log });
-    await sh('nsc', ['ssh', instanceId, '--', 'sh', '/root/start.sh'], { log });
-
-    // 6. confirm the coordinator launched. Past failures silently left the VM
+    // 3. confirm the coordinator launched. Past failures silently left the VM
     // idle, so this is load-bearing. Two durable signals, because a small burst
-    // can finish (and the node process exit) before `nsc ssh pgrep` even lands:
+    // can finish (and the process exit) before status polling sees progress:
     //   - the runs row reaches a terminal status ('done' = ran to completion,
     //     'failed' = coordinator recorded a fatal error), or
-    //   - the process is still alive (long bursts run for minutes).
+    //   - Namespace reports the instance still alive (long bursts run for minutes).
     // Only a row still 'running' with no live process after the window is a
     // genuine never-started / idle-VM failure.
     let confirmed = false;
@@ -340,22 +302,19 @@ async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<S
       if (status === 'done') { log('coordinator completed (status=done)'); confirmed = true; break; }
       if (status === 'failed') {
         log(`ERROR: coordinator reported failure: ${rows[0]?.error_message ?? 'unknown'}`);
-        await sh('nsc', ['ssh', instanceId, '--', 'tail', '-30', '/root/run.log'], { log });
         return { shard, runId: opts.runId, rc: 1 };
       }
-      const alive = await sh('nsc', ['ssh', instanceId, '--', 'pgrep', '-f', 'coordinator.cjs'], { log, quiet: true });
+      const alive = await sh('nsc', ['describe', instanceId], { log, quiet: true });
       if (alive.code === 0) { log(`coordinator confirmed running on VM (after ${i})`); confirmed = true; break; }
       await sleep(1000);
     }
     if (!confirmed) {
-      log('ERROR: coordinator not running and run not terminal after timeout; tail /root/run.log:');
-      await sh('nsc', ['ssh', instanceId, '--', 'tail', '-30', '/root/run.log'], { log });
+      log('ERROR: coordinator not running and run not terminal after timeout');
       return { shard, runId: opts.runId, rc: 1 };
     }
 
     log(`OK  run_id=${opts.runId}  instance=${instanceId}`);
-    log(`  Tail logs:  nsc ssh ${instanceId} -- tail -f /root/run.log`);
-    log(`  Stop:       nsc ssh ${instanceId} -- pkill -TERM node`);
+    log(`  Tail logs:  nsc logs ${instanceId} --follow`);
     log(`  Destroy:    nsc destroy --force ${instanceId}`);
     return { shard, runId: opts.runId, rc: 0 };
   } catch (err) {
@@ -363,7 +322,6 @@ async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<S
     return { shard, runId: opts.runId, rc: 1 };
   } finally {
     if (client) await client.end().catch(() => {});
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
@@ -389,6 +347,7 @@ async function main(): Promise<void> {
   console.log(' burst-100k :: launch');
   console.log(rule);
   console.log(`  provider:   ${args.provider}`);
+  console.log(`  image:      ${args.image}`);
   console.log(`  total:      ${args.total.toLocaleString()} sandboxes`);
   console.log(`  vms:        ${args.vms}`);
   console.log(`  per-vm:     ${perVm.toLocaleString()} sandboxes`);
@@ -401,12 +360,6 @@ async function main(): Promise<void> {
   for (const v of ['TIGRIS_STORAGE_ENDPOINT', 'TIGRIS_STORAGE_BUCKET', 'TIGRIS_STORAGE_ACCESS_KEY_ID', 'TIGRIS_STORAGE_SECRET_ACCESS_KEY']) {
     if (!process.env[v]) { console.error(`${v} not set (check .env)`); process.exit(2); }
   }
-
-  // Bundle the coordinator ONCE up front (doing it once removes the race on
-  // dist/burst-100k.cjs across parallel shards).
-  console.log('[launch] bundling coordinator -> dist/burst-100k.cjs');
-  const bundle = spawnSync('npm', ['run', '--silent', 'bundle:burst-100k'], { stdio: 'inherit', cwd: repoRoot });
-  if (bundle.status !== 0) { console.error(`[launch] bundle failed (rc=${bundle.status}); aborting`); process.exit(bundle.status ?? 1); }
 
   // Apply the Postgres schema ONCE up front. `CREATE TABLE/INDEX IF NOT EXISTS`
   // is not race-safe under N parallel applies, so the orchestrator owns it.
@@ -423,6 +376,7 @@ async function main(): Promise<void> {
       const log: Logger = (line) => console.log(`${tag}${line}`);
       const opts: ShardOpts = {
         provider: args.provider,
+        image: args.image,
         runId: runIds[i],
         concurrencyTarget: perVm,
         duration: args.duration,
