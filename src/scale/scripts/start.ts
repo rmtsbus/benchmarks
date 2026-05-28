@@ -27,6 +27,10 @@
  *
  * Optional env:
  *   GITHUB_SHA                Defaults to `git rev-parse HEAD` or "local"
+ *   SCALE_IMAGE_REPO          Default image repository when --image is unset
+ *                             (default: nscr.io/5enq753trme1k/scale)
+ *   SCALE_IMAGE_TAG           Default image tag when --image is unset
+ *                             (default: latest)
  */
 
 import 'dotenv/config';
@@ -53,7 +57,9 @@ const PROVIDER_SECRET_VARS = [
 ];
 
 const MACHINE_TYPE_DEFAULT = '16x32';
-const DEFAULT_SCALE_IMAGE = 'nscr.io/5enq753trme1k/scale:latest';
+const DEFAULT_SCALE_IMAGE_REPO = process.env.SCALE_IMAGE_REPO ?? 'nscr.io/5enq753trme1k/scale';
+const DEFAULT_SCALE_IMAGE_TAG = process.env.SCALE_IMAGE_TAG ?? 'latest';
+const DEFAULT_SCALE_IMAGE = `${DEFAULT_SCALE_IMAGE_REPO}:${DEFAULT_SCALE_IMAGE_TAG}`;
 
 // ----- helpers --------------------------------------------------------------
 

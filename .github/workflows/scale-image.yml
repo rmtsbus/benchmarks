@@ -23,7 +23,7 @@ jobs:
     name: Build and push scale image
     runs-on: namespace-profile-default
     env:
-      IMAGE_REPO: nscr.io/5enq753trme1k/scale
+      IMAGE_REPO: ${{ vars.SCALE_IMAGE_REPO || 'nscr.io/5enq753trme1k/scale' }}
       IMAGE_SHA_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
