@@ -48,10 +48,10 @@ const repoRoot = path.resolve(__dirname, '../../..');
 const PROVIDER_SECRET_VARS = [
   'E2B_API_KEY', 'MODAL_TOKEN_ID', 'MODAL_TOKEN_SECRET', 'DAYTONA_API_KEY',
   'CSB_API_KEY', 'RUNLOOP_API_KEY', 'TENSORLAKE_API_KEY', 'DECLAW_API_KEY',
-  'VERCEL_TOKEN', 'VERCEL_TEAM_ID', 'VERCEL_PROJECT_ID',
+  'VERCEL_TOKEN', 'VERCEL_TEAM_ID', 'VERCEL_PROJECT_ID', 'NORTHFLANK_TOKEN', 'NORTHFLANK_PROJECT_ID'
 ];
 
-const MACHINE_TYPE_DEFAULT = '16x32';
+const MACHINE_TYPE_DEFAULT = '1x2';
 const DEFAULT_SCALE_IMAGE_REPO = process.env.SCALE_IMAGE_REPO ?? 'nscr.io/5enq753trme1k/scale';
 const DEFAULT_SCALE_IMAGE_TAG = process.env.SCALE_IMAGE_TAG ?? 'latest';
 const DEFAULT_SCALE_IMAGE = `${DEFAULT_SCALE_IMAGE_REPO}:${DEFAULT_SCALE_IMAGE_TAG}`;
@@ -70,7 +70,7 @@ interface RunResult { code: number; stdout: string; }
 function sh(
   cmd: string,
   args: string[],
-  opts: { log: Logger; capture?: boolean; quiet?: boolean } = { log: () => {} },
+  opts: { log: Logger; capture?: boolean; quiet?: boolean } = { log: () => { } },
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: repoRoot });

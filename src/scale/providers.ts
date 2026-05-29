@@ -2,9 +2,10 @@
 import { declaw } from '@computesdk/declaw';
 import { e2b } from '@computesdk/e2b';
 import { modal } from '@computesdk/modal';
+import { northflank } from '@computesdk/northflank';
 import { runloop } from '@computesdk/runloop';
 import { tensorlake } from '@computesdk/tensorlake';
-import { vercel } from '@computesdk/vercel';
+//import { vercel } from '@computesdk/vercel';
 import type { BurstProviderConfig } from './types.js';
 
 /**
@@ -78,17 +79,28 @@ export const providers: BurstProviderConfig[] = [
     sandboxOptions: { timeout: KEEP_ALIVE_MS },
   },
   {
-    name: 'vercel',
-    requiredEnvVars: ['VERCEL_TOKEN', 'VERCEL_TEAM_ID', 'VERCEL_PROJECT_ID'],
-    createCompute: () => vercel({
-      token: process.env.VERCEL_TOKEN!,
-      teamId: process.env.VERCEL_TEAM_ID!,
-      projectId: process.env.VERCEL_PROJECT_ID!,
+    name: 'northflank',
+    requiredEnvVars: ['NORTHFLANK_TOKEN', 'NORTHFLANK_PROJECT_ID'],
+    createCompute: () => northflank({
+      token: process.env.NORTHFLANK_TOKEN!,
+      projectId: process.env.NORTHFLANK_PROJECT_ID!,
+      runtime: 'node',
     }),
     concurrencyTarget: 100_000,
     perRequestTimeoutMs: 120_000,
-    sandboxOptions: { timeout: KEEP_ALIVE_MS },
   },
+  // {
+  //   name: 'vercel',
+  //   requiredEnvVars: ['VERCEL_TOKEN', 'VERCEL_TEAM_ID', 'VERCEL_PROJECT_ID'],
+  //   createCompute: () => vercel({
+  //     token: process.env.VERCEL_TOKEN!,
+  //     teamId: process.env.VERCEL_TEAM_ID!,
+  //     projectId: process.env.VERCEL_PROJECT_ID!,
+  //   }),
+  //   concurrencyTarget: 100_000,
+  //   perRequestTimeoutMs: 120_000,
+  //   sandboxOptions: { timeout: KEEP_ALIVE_MS },
+  // },
   // {
   //   name: 'daytona',
   //   requiredEnvVars: ['DAYTONA_API_KEY'],
