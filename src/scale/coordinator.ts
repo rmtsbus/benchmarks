@@ -7,7 +7,7 @@ import type { BenchContext } from '@computesdk/bench';
 import { getProvider } from './providers.js';
 import { log } from './logger.js';
 import { TigrisSink } from './sinks/tigris.js';
-import { runBurst } from './runner.js';
+import { BurstLifecycle } from './runner.js';
 import type { ProgressStats, MetricsSample } from './types.js';
 
 // dotenv only matters for local invocation. In production the env is set by
@@ -207,49 +207,78 @@ async function main() {
     log.info('bench ingest enabled');
   }
 
-  try {
-    const burstTask = async (ctx: BenchContext) => {
-      log.phase(`burst — firing ${provider.concurrencyTarget} requests at t=0 (no stagger)`);
-      await runBurst(provider, compute, {
-        async onResult(result) {
-          statusCounts[result.status]++;
-          if (result.status === 'success') {
-            okResults.push({
-              idx: result.sandbox_idx,
-              ms: result.latency_ms,
-              first_command_ms: result.first_command_ms,
-            });
-          } else if (result.status === 'failed' && result.failure_class) {
-            createFailureClass[result.failure_class]++;
-          }
-          intervals.push({
-            start: Date.parse(result.started_at),
-            end: Date.parse(result.completed_at),
-          });
-          ctx.emitMetric('sandbox.result', {
-            status: result.status,
-            latency_ms: result.latency_ms,
-            first_command_ms: result.first_command_ms,
-            failure_class: result.failure_class,
-            sandbox_idx: result.sandbox_idx,
-            http_status: result.http_status,
-            error_code: result.error_code,
-          });
-          tigris.writeResult(result);
-        },
-        onProgress(stats) {
-          lastStats = stats;
-          bench.progress({
-            done: stats.done,
-            inFlight: stats.in_flight,
-            errors: stats.errors,
-            total: provider.concurrencyTarget,
-          });
-        },
-      });
-    };
+  const pauseMs = (() => {
+    const raw = process.env.LIFECYCLE_PAUSE_MS;
+    if (!raw) return 0;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  })();
 
-    bench.add(`scale.${PROVIDER}.burst`, burstTask);
+  try {
+    const flow = new BurstLifecycle(provider, compute, {
+      async onResult(result) {
+        statusCounts[result.status]++;
+        if (result.status === 'success') {
+          okResults.push({
+            idx: result.sandbox_idx,
+            ms: result.latency_ms,
+            first_command_ms: result.first_command_ms,
+          });
+        } else if (result.status === 'failed' && result.failure_class) {
+          createFailureClass[result.failure_class]++;
+        }
+        intervals.push({
+          start: Date.parse(result.started_at),
+          end: Date.parse(result.completed_at),
+        });
+        bench.emit('sandbox.result', {
+          status: result.status,
+          latency_ms: result.latency_ms,
+          first_command_ms: result.first_command_ms,
+          failure_class: result.failure_class,
+          sandbox_idx: result.sandbox_idx,
+          http_status: result.http_status,
+          error_code: result.error_code,
+        });
+        tigris.writeResult(result);
+      },
+      onProgress(stats) {
+        lastStats = stats;
+        bench.progress({
+          done: stats.done,
+          inFlight: stats.in_flight,
+          errors: stats.errors,
+          total: provider.concurrencyTarget,
+        });
+      },
+    });
+
+    bench.add(`scale.${PROVIDER}.create`, async (_ctx: BenchContext) => {
+      log.phase(`create — firing ${provider.concurrencyTarget} requests at t=0 (no stagger)`);
+      await flow.create();
+    });
+    bench.add(`scale.${PROVIDER}.exec.initial`, async (_ctx: BenchContext) => {
+      await flow.execInitial();
+    });
+    if (pauseMs > 0) {
+      bench.add(`scale.${PROVIDER}.pause`, async (_ctx: BenchContext) => {
+        log.phase(`pause — waiting ${pauseMs}ms`);
+        await flow.pause(pauseMs);
+      });
+    }
+    bench.add(`scale.${PROVIDER}.exec.after_pause`, async (_ctx: BenchContext) => {
+      await flow.execAfterPause();
+    });
+    bench.add(`scale.${PROVIDER}.destroy`, async (ctx: BenchContext) => {
+      await flow.destroy();
+      ctx.emitMetric('sandbox.result.count', {
+        total: provider.concurrencyTarget,
+        success: statusCounts.success,
+        partial: statusCounts.partial,
+        readiness_failed: statusCounts.readiness_failed,
+        failed: statusCounts.failed,
+      });
+    });
     try {
       await bench.run({ iterations: 1, warmup: 0 });
     } catch (benchErr: any) {

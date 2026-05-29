@@ -15,6 +15,8 @@ export interface RunnerCallbacks {
   onProgress: (stats: ProgressStats) => void;
 }
 
+type Pending = { sandbox: any; result: SandboxResult };
+
 /**
  * Run the 100k burst in two coordinated phases so we can distinguish
  * "stayed alive until end-of-test" from "died mid-test":
@@ -38,39 +40,167 @@ export interface RunnerCallbacks {
  * downstream concurrency-over-time view reflects how long each sandbox was
  * actually held alive — not just how long create took.
  */
-export async function runBurst(
-  config: BurstProviderConfig,
-  compute: any,
-  callbacks: RunnerCallbacks,
-): Promise<void> {
-  const { concurrencyTarget, sandboxOptions, perRequestTimeoutMs = 120_000 } = config;
-  const limit = pLimit(concurrencyTarget);
+export class BurstLifecycle {
+  private config: BurstProviderConfig;
+  private compute: any;
+  private callbacks: RunnerCallbacks;
+  private done = 0;
+  private in_flight = 0;
+  private errors = 0;
+  private startTime = Date.now();
+  private progressStep: number;
+  private nextProgressMilestone: number;
+  private survivors: Array<Pending | null>;
 
-  let done = 0;
-  let in_flight = 0;
-  let errors = 0;
-  const startTime = Date.now();
+  constructor(config: BurstProviderConfig, compute: any, callbacks: RunnerCallbacks) {
+    this.config = config;
+    this.compute = compute;
+    this.callbacks = callbacks;
+    this.progressStep = Math.max(1, Math.floor(config.concurrencyTarget / 10));
+    this.nextProgressMilestone = this.progressStep;
+    this.survivors = new Array(config.concurrencyTarget).fill(null);
+  }
 
-  // Milestone progress lines every ~10% of work done.
-  const progressStep = Math.max(1, Math.floor(concurrencyTarget / 10));
-  let nextProgressMilestone = progressStep;
+  async create(): Promise<void> {
+    const { concurrencyTarget, sandboxOptions, perRequestTimeoutMs = 120_000 } = this.config;
+    const limit = pLimit(concurrencyTarget);
 
-  // Survivors of phase 1 (sandbox handle + partially-filled result). Indexed
-  // by sandbox_idx so we can preserve submission-order in phase 2.
-  type Pending = { sandbox: any; result: SandboxResult };
-  const survivors: Array<Pending | null> = new Array(concurrencyTarget).fill(null);
+    const phase1: Promise<void>[] = [];
+    for (let idx = 0; idx < concurrencyTarget; idx++) {
+      phase1.push(limit(async () => {
+        this.in_flight++;
+        const started_at = new Date().toISOString();
+        const t0 = performance.now();
 
-  /**
-   * Emit a finalised result: persist via callbacks, log, decrement in_flight,
-   * advance milestones. Called from either phase 1 (failed / readiness_failed)
-   * or phase 2 (success / partial).
-   */
-  const emit = async (result: SandboxResult): Promise<void> => {
+        const result: SandboxResult = {
+          sandbox_idx: idx,
+          started_at,
+          completed_at: '',
+          latency_ms: 0,
+          first_command_ms: null,
+          status: 'success',
+          failure_class: null,
+          http_status: null,
+          error_code: null,
+          error_message: null,
+          provider_metadata: null,
+        };
+
+        try {
+          const sandbox = await withTimeout(this.compute.sandbox.create(sandboxOptions), perRequestTimeoutMs);
+          result.latency_ms = Math.round(performance.now() - t0);
+          result.provider_metadata = extractProviderMetadata(sandbox);
+          this.survivors[idx] = { sandbox, result };
+        } catch (err: any) {
+          this.errors++;
+          result.status = 'failed';
+          result.failure_class = classifyError(err);
+          result.http_status = numericHttpStatus(err);
+          result.error_code = err?.code ?? null;
+          result.error_message = truncate(err?.message ?? String(err), 500);
+          result.latency_ms = Math.round(performance.now() - t0);
+          await this.emit(result);
+        }
+      }));
+    }
+
+    await Promise.all(phase1);
+    const survivorCount = this.survivors.reduce((n, s) => n + (s ? 1 : 0), 0);
+    log.phase(`create complete — ${survivorCount}/${concurrencyTarget} sandboxes alive`);
+  }
+
+  async execInitial(): Promise<void> {
+    const { concurrencyTarget } = this.config;
+    const limit = pLimit(concurrencyTarget);
+    const tasks: Promise<void>[] = [];
+
+    for (let idx = 0; idx < concurrencyTarget; idx++) {
+      const pending = this.survivors[idx];
+      if (!pending) continue;
+      tasks.push(limit(async () => {
+        const { sandbox, result } = pending;
+        const afterCreate = performance.now();
+        try {
+          await withTimeout(sandbox.runCommand('node -v'), FIRST_COMMAND_TIMEOUT_MS);
+          result.first_command_ms = Math.round(performance.now() - afterCreate);
+        } catch (cmdErr: any) {
+          this.errors++;
+          result.status = 'readiness_failed';
+          result.failure_class = classifyError(cmdErr);
+          result.http_status = numericHttpStatus(cmdErr);
+          result.error_code = cmdErr?.code ?? null;
+          result.error_message = truncate(cmdErr?.message ?? String(cmdErr), 500);
+          if (sandbox?.destroy) {
+            Promise.resolve(sandbox.destroy()).catch(() => {});
+          }
+          this.survivors[idx] = null;
+          await this.emit(result);
+        }
+      }));
+    }
+
+    await Promise.all(tasks);
+  }
+
+  async pause(ms: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async execAfterPause(): Promise<void> {
+    const { concurrencyTarget } = this.config;
+    const limit = pLimit(concurrencyTarget);
+    const tasks: Promise<void>[] = [];
+
+    for (let idx = 0; idx < concurrencyTarget; idx++) {
+      const pending = this.survivors[idx];
+      if (!pending) continue;
+      tasks.push(limit(async () => {
+        const { sandbox, result } = pending;
+        try {
+          await withTimeout(sandbox.runCommand('node -v'), LIVENESS_CHECK_TIMEOUT_MS);
+          result.status = 'success';
+        } catch (livenessErr: any) {
+          this.errors++;
+          result.status = 'partial';
+          result.failure_class = classifyError(livenessErr);
+          result.http_status = numericHttpStatus(livenessErr);
+          result.error_code = livenessErr?.code ?? null;
+          result.error_message = truncate(livenessErr?.message ?? String(livenessErr), 500);
+        }
+      }));
+    }
+
+    await Promise.all(tasks);
+  }
+
+  async destroy(): Promise<void> {
+    const { concurrencyTarget } = this.config;
+    const limit = pLimit(concurrencyTarget);
+    const tasks: Promise<void>[] = [];
+
+    for (let idx = 0; idx < concurrencyTarget; idx++) {
+      const pending = this.survivors[idx];
+      if (!pending) continue;
+      this.survivors[idx] = null;
+      tasks.push(limit(async () => {
+        const { sandbox, result } = pending;
+        if (sandbox?.destroy) {
+          await Promise.resolve(sandbox.destroy()).catch(() => {});
+        }
+        await this.emit(result);
+      }));
+    }
+
+    await Promise.all(tasks);
+  }
+
+  private async emit(result: SandboxResult): Promise<void> {
+    const { concurrencyTarget } = this.config;
     result.completed_at = new Date().toISOString();
-    in_flight--;
-    done++;
-    try { await callbacks.onResult(result); } catch { /* swallow */ }
-    callbacks.onProgress({ done, in_flight, errors });
+    this.in_flight--;
+    this.done++;
+    try { await this.callbacks.onResult(result); } catch { /* swallow */ }
+    this.callbacks.onProgress({ done: this.done, in_flight: this.in_flight, errors: this.errors });
 
     if (result.status === 'success') {
       const sb = result.provider_metadata?.sandboxId
@@ -86,114 +216,32 @@ export async function runBurst(
     }
     log.data(result);
 
-    if (done >= nextProgressMilestone && done < concurrencyTarget) {
-      const elapsedMs = Date.now() - startTime;
-      const rate = done / (elapsedMs / 1000);
-      const etaSec = (concurrencyTarget - done) / Math.max(rate, 0.001);
+    if (this.done >= this.nextProgressMilestone && this.done < concurrencyTarget) {
+      const elapsedMs = Date.now() - this.startTime;
+      const rate = this.done / (elapsedMs / 1000);
+      const etaSec = (concurrencyTarget - this.done) / Math.max(rate, 0.001);
       log.stat(
-        `progress ${done}/${concurrencyTarget} ` +
-        `(in_flight=${in_flight} errors=${errors}) ` +
+        `progress ${this.done}/${concurrencyTarget} ` +
+        `(in_flight=${this.in_flight} errors=${this.errors}) ` +
         `rate=${rate.toFixed(1)}/s eta≈${etaSec.toFixed(0)}s`,
       );
-      nextProgressMilestone += progressStep;
+      this.nextProgressMilestone += this.progressStep;
     }
-  };
-
-  // ─── Phase 1: create + readiness ─────────────────────────────────────────
-  const phase1: Promise<void>[] = [];
-  for (let idx = 0; idx < concurrencyTarget; idx++) {
-    phase1.push(limit(async () => {
-      in_flight++;
-      const started_at = new Date().toISOString();
-      const t0 = performance.now();
-
-      const result: SandboxResult = {
-        sandbox_idx: idx,
-        started_at,
-        completed_at: '',
-        latency_ms: 0,
-        first_command_ms: null,
-        status: 'success', // optimistic; finalized below or in phase 2
-        failure_class: null,
-        http_status: null,
-        error_code: null,
-        error_message: null,
-        provider_metadata: null,
-      };
-
-      let sandbox: any = null;
-      try {
-        sandbox = await withTimeout(compute.sandbox.create(sandboxOptions), perRequestTimeoutMs);
-        result.latency_ms = Math.round(performance.now() - t0);
-        result.provider_metadata = extractProviderMetadata(sandbox);
-      } catch (err: any) {
-        errors++;
-        result.status = 'failed';
-        result.failure_class = classifyError(err);
-        result.http_status = numericHttpStatus(err);
-        result.error_code = err?.code ?? null;
-        result.error_message = truncate(err?.message ?? String(err), 500);
-        result.latency_ms = Math.round(performance.now() - t0);
-        await emit(result);
-        return;
-      }
-
-      // Readiness check — same `node -v` the daily benchmark uses.
-      const afterCreate = performance.now();
-      try {
-        await withTimeout(sandbox.runCommand('node -v'), FIRST_COMMAND_TIMEOUT_MS);
-        result.first_command_ms = Math.round(performance.now() - afterCreate);
-        // Survived phase 1 — keep alive; phase 2 will finalize and destroy.
-        survivors[idx] = { sandbox, result };
-      } catch (cmdErr: any) {
-        errors++;
-        result.status = 'readiness_failed';
-        result.failure_class = classifyError(cmdErr);
-        result.http_status = numericHttpStatus(cmdErr);
-        result.error_code = cmdErr?.code ?? null;
-        result.error_message = truncate(cmdErr?.message ?? String(cmdErr), 500);
-        // Not usable — destroy now (fire-and-forget) and emit.
-        if (sandbox?.destroy) {
-          Promise.resolve(sandbox.destroy()).catch(() => {});
-        }
-        await emit(result);
-      }
-    }));
   }
+}
 
-  await Promise.all(phase1);
-
-  const survivorCount = survivors.reduce((n, s) => n + (s ? 1 : 0), 0);
-  log.phase(`phase 1 complete — ${survivorCount}/${concurrencyTarget} sandboxes alive, ` +
-    `holding until end-of-test`);
-  log.phase(`phase 2 — running end-of-test liveness check + destroying ${survivorCount} sandboxes`);
-
-  // ─── Phase 2: end-of-test liveness + destroy ─────────────────────────────
-  const phase2: Promise<void>[] = [];
-  for (let idx = 0; idx < concurrencyTarget; idx++) {
-    const pending = survivors[idx];
-    if (!pending) continue;
-    phase2.push(limit(async () => {
-      const { sandbox, result } = pending;
-      try {
-        await withTimeout(sandbox.runCommand('node -v'), LIVENESS_CHECK_TIMEOUT_MS);
-        result.status = 'success';
-      } catch (livenessErr: any) {
-        errors++;
-        result.status = 'partial';
-        result.failure_class = classifyError(livenessErr);
-        result.http_status = numericHttpStatus(livenessErr);
-        result.error_code = livenessErr?.code ?? null;
-        result.error_message = truncate(livenessErr?.message ?? String(livenessErr), 500);
-      }
-      if (sandbox?.destroy) {
-        Promise.resolve(sandbox.destroy()).catch(() => {});
-      }
-      await emit(result);
-    }));
-  }
-
-  await Promise.all(phase2);
+export async function runBurst(
+  config: BurstProviderConfig,
+  compute: any,
+  callbacks: RunnerCallbacks,
+): Promise<void> {
+  const flow = new BurstLifecycle(config, compute, callbacks);
+  await flow.create();
+  await flow.execInitial();
+  log.phase('phase 1 complete — holding survivors until end-of-test');
+  await flow.execAfterPause();
+  log.phase('phase 2 complete — destroying survivors');
+  await flow.destroy();
 }
 
 /**
