@@ -25,8 +25,6 @@ import { createBenchQueryClient } from '@computesdk/bench';
 import type { BenchRunSummary } from '@computesdk/bench';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
-const QUERY_URL = 'https://platform.computesdk.com/api/v1';
-
 interface Args {
   groupId?: string;
   recent: boolean;
@@ -83,8 +81,7 @@ function parseArgs(): Args {
 const args = parseArgs();
 
 const queryUrl = QUERY_URL;
-const apiKey = process.env.COMPUTESDK_API_KEY;
-const query = createBenchQueryClient(queryUrl, apiKey);
+const query = createBenchQueryClient(process.env.COMPUTESDK_API_KEY);
 
 // Resolve groupId (either explicit or most recent)
 let groupId = args.groupId;

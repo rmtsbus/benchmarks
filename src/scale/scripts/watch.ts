@@ -21,8 +21,6 @@ import 'dotenv/config';
 import { createBenchQueryClient } from '@computesdk/bench';
 import type { BenchRunSummary } from '@computesdk/bench';
 
-const QUERY_URL = 'https://platform.computesdk.com/api/v1';
-
 interface Args {
   runIds: string[];
   recent: number | null;
@@ -86,8 +84,7 @@ function parseArgs(): Args {
 const args = parseArgs();
 
 const queryUrl = QUERY_URL;
-const apiKey = process.env.COMPUTESDK_API_KEY;
-const query = createBenchQueryClient(queryUrl, apiKey);
+const query = createBenchQueryClient(process.env.COMPUTESDK_API_KEY);
 
 // Resolve --recent into RUN_IDs
 let watchIds = [...args.runIds];
