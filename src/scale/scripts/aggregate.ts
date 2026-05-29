@@ -103,19 +103,31 @@ if (!groupId) {
 }
 
 // Fetch progress and runs plus metric aggregates in parallel.
-const [progress, runsRes, latencyDistRaw, firstCmdDistRaw, statusCountsRaw, failureClassCountsRaw] = await Promise.all([
+const [
+  progress,
+  runsRes,
+  latencyDistRaw,
+  firstCmdDistRaw,
+  ttiDistRaw,
+  statusCountsRaw,
+  errorCodeCountsRaw,
+  latencyBySegmentRaw,
+] = await Promise.all([
   query.getBatchProgress(groupId),
   query.listRuns({ batch: groupId, limit: 500 }),
-  query.getBatchMetricStats(groupId, { name: 'sandbox.result', field: 'latency_ms' }),
-  query.getBatchMetricStats(groupId, { name: 'sandbox.result', field: 'first_command_ms' }),
-  query.getBatchMetricCounts(groupId, { name: 'sandbox.result', field: 'status' }),
-  query.getBatchMetricCounts(groupId, { name: 'sandbox.result', field: 'failure_class' }),
+  query.getBatchMetricStats(groupId, { name: 'latency_ms', field: 'value' }),
+  query.getBatchMetricStats(groupId, { name: 'first_command_ms', field: 'value' }),
+  query.getBatchMetricStats(groupId, { name: 'tti_ms', field: 'value' }),
+  query.getBatchMetricCounts(groupId, { name: 'sandbox_result', field: 'status' }),
+  query.getBatchMetricCounts(groupId, { name: 'sandbox_result', field: 'error_code' }),
+  query.getBatchMetricStats(groupId, { name: 'latency_ms', field: 'value', groupBy: 'submission_segment' }),
 ]);
 
 const latencyDist = latencyDistRaw as BenchMetricDistribution;
 const firstCmdDist = firstCmdDistRaw as BenchMetricDistribution;
 const statusCounts = statusCountsRaw as BenchMetricCounts;
-const failureClassCounts = failureClassCountsRaw as BenchMetricCounts;
+const errorCodeCounts = errorCodeCountsRaw as BenchMetricCounts;
+const ttiDist = ttiDistRaw as BenchMetricDistribution;
 
 const countMap = (rows: Array<{ key: string; count: number }>): Record<string, number> => {
   const out: Record<string, number> = {};
@@ -123,7 +135,7 @@ const countMap = (rows: Array<{ key: string; count: number }>): Record<string, n
   return out;
 };
 const statusMap = countMap(statusCounts.counts);
-const failureMap = countMap(failureClassCounts.counts);
+const failureMap = countMap(errorCodeCounts.counts);
 
 // BenchBatchProgress carries only per-run counters (no roll-up), so derive both
 // the shard-level breakdown and the sandbox-level totals here. A run is terminal
@@ -170,9 +182,9 @@ const final = {
   partials,
   readiness_failures: readinessFailures,
   failures: failed,
-  timeouts: failureMap.timeout ?? null,
-  http_errors: failureMap.http_error ?? null,
-  network_errors: failureMap.network_error ?? null,
+  timeouts: null,
+  http_errors: null,
+  network_errors: null,
   p50_latency_ms: latencyDist.p50,
   p99_latency_ms: latencyDist.p99,
 };
@@ -199,12 +211,8 @@ const aggregate = {
     readiness_failed: readinessFailures,
     failed,
   },
-  create_failure_class: {
-    timeout: failureMap.timeout ?? null,
-    http_error: failureMap.http_error ?? null,
-    network_error: failureMap.network_error ?? null,
-  },
-  failure_breakdown_by_code: null,
+  create_failure_class: null,
+  failure_breakdown_by_code: errorCodeCounts.counts,
   first_command_distribution: {
     count: firstCmdDist.count,
     min_ms: firstCmdDist.min,
@@ -219,8 +227,21 @@ const aggregate = {
     max_ms: firstCmdDist.max,
     mean_ms: firstCmdDist.avg,
   },
-  tti_distribution: null,
-  submission_segments: null,
+  tti_distribution: {
+    count: ttiDist.count,
+    min_ms: ttiDist.min,
+    p10_ms: ttiDist.p10 ?? null,
+    p25_ms: ttiDist.p25 ?? null,
+    p50_ms: ttiDist.p50,
+    p75_ms: ttiDist.p75 ?? null,
+    p90_ms: ttiDist.p90 ?? null,
+    p95_ms: ttiDist.p95,
+    p99_ms: ttiDist.p99,
+    p999_ms: ttiDist.p999 ?? null,
+    max_ms: ttiDist.max,
+    mean_ms: ttiDist.avg,
+  },
+  submission_segments: latencyBySegmentRaw,
   concurrency_summary: null,
   concurrency_timeline: null,
   group_id: groupId,

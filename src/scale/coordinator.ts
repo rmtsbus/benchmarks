@@ -179,7 +179,15 @@ async function main() {
     return sample;
   };
   const metricsInterval = setInterval(() => {
-    bench.emit('system.metrics', sampleMetrics());
+    const sample = sampleMetrics();
+    bench.emit('coordinator_metrics', {
+      mem_rss_mb: sample.mem_rss_mb,
+      event_loop_p99_ms: sample.event_loop_p99_ms,
+      open_fds: sample.open_fds,
+      tcp_inuse: sample.sockstat?.tcp_inuse ?? null,
+      tcp_tw: sample.sockstat?.tcp_tw ?? null,
+      loadavg_1m: sample.loadavg_1m,
+    });
   }, METRICS_SAMPLE_MS);
 
   let shuttingDown = false;
@@ -231,15 +239,33 @@ async function main() {
           start: Date.parse(result.started_at),
           end: Date.parse(result.completed_at),
         });
-        bench.emit('sandbox.result', {
+        const segmentOf = (idx: number): 'first_25pct' | 'middle_50pct' | 'last_25pct' => {
+          const q1 = Math.floor(provider.concurrencyTarget * 0.25);
+          const q3 = Math.floor(provider.concurrencyTarget * 0.75);
+          if (idx < q1) return 'first_25pct';
+          if (idx < q3) return 'middle_50pct';
+          return 'last_25pct';
+        };
+
+        bench.emit('sandbox_result', {
           status: result.status,
-          latency_ms: result.latency_ms,
-          first_command_ms: result.first_command_ms,
-          failure_class: result.failure_class,
-          sandbox_idx: result.sandbox_idx,
-          http_status: result.http_status,
           error_code: result.error_code,
+          submission_segment: segmentOf(result.sandbox_idx),
         });
+        bench.emit('latency_ms', {
+          value: result.latency_ms,
+          submission_segment: segmentOf(result.sandbox_idx),
+        });
+        if (result.first_command_ms != null) {
+          bench.emit('first_command_ms', {
+            value: result.first_command_ms,
+            submission_segment: segmentOf(result.sandbox_idx),
+          });
+          bench.emit('tti_ms', {
+            value: result.latency_ms + result.first_command_ms,
+            submission_segment: segmentOf(result.sandbox_idx),
+          });
+        }
         tigris.writeResult(result);
       },
       onProgress(stats) {
@@ -249,6 +275,9 @@ async function main() {
           inFlight: stats.in_flight,
           errors: stats.errors,
           total: provider.concurrencyTarget,
+        });
+        bench.emit('concurrency', {
+          active: stats.in_flight,
         });
       },
     });
@@ -271,7 +300,7 @@ async function main() {
     });
     bench.add(`scale.${PROVIDER}.destroy`, async (ctx: BenchContext) => {
       await flow.destroy();
-      ctx.emitMetric('sandbox.result.count', {
+      ctx.emitMetric('sandbox_result_count', {
         total: provider.concurrencyTarget,
         success: statusCounts.success,
         partial: statusCounts.partial,
