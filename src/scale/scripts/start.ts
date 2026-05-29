@@ -27,6 +27,8 @@
  *
  * Optional env:
  *   GITHUB_SHA                Defaults to `git rev-parse HEAD` or "local"
+ *   BENCHMARK_INGEST_URL      Bench ingest endpoint for run/span/output events
+ *   BENCHMARK_INGEST_API_KEY  Bench ingest token (Bearer)
  *   SCALE_IMAGE_REPO          Default image repository when --image is unset
  *                             (default: nscr.io/5enq753trme1k/scale)
  *   SCALE_IMAGE_TAG           Default image tag when --image is unset
@@ -234,6 +236,12 @@ async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<S
       '--env', `TIGRIS_STORAGE_SECRET_ACCESS_KEY=${process.env.TIGRIS_STORAGE_SECRET_ACCESS_KEY!}`,
       '--env', `CONCURRENCY_TARGET=${opts.concurrencyTarget}`,
     ];
+    if (process.env.BENCHMARK_INGEST_URL) {
+      runArgs.push('--env', `BENCHMARK_INGEST_URL=${process.env.BENCHMARK_INGEST_URL}`);
+    }
+    if (process.env.BENCHMARK_INGEST_API_KEY) {
+      runArgs.push('--env', `BENCHMARK_INGEST_API_KEY=${process.env.BENCHMARK_INGEST_API_KEY}`);
+    }
     if (opts.groupId !== undefined && opts.shardIndex !== undefined && opts.shardCount !== undefined) {
       runArgs.push('--env', `GROUP_ID=${opts.groupId}`);
       runArgs.push('--env', `SHARD_INDEX=${opts.shardIndex}`);

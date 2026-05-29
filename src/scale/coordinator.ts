@@ -2,6 +2,7 @@ import { config as loadDotenv } from 'dotenv';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
+import { createBench } from '@computesdk/bench';
 import { getProvider } from './providers.js';
 import { log } from './logger.js';
 import { PostgresSink } from './sinks/postgres.js';
@@ -44,6 +45,8 @@ async function main() {
   })();
 
   const provider = getProvider(PROVIDER);
+  const benchApiUrl = process.env.BENCHMARK_INGEST_URL;
+  const benchApiKey = process.env.BENCHMARK_INGEST_API_KEY;
 
   // Allow env override of concurrencyTarget for local smoke tests.
   const override = process.env.CONCURRENCY_TARGET;
@@ -115,6 +118,18 @@ async function main() {
   // the uploaded /root/start.sh) to Tigris. Skipped silently when the env var
   // is unset (e.g. local `npm run bench:scale:local` runs).
   const COORDINATOR_LOG_PATH = process.env.COORDINATOR_LOG_PATH;
+  const bench = createBench({
+    label: `scale.${PROVIDER}`,
+    apiUrl: benchApiUrl,
+    apiKey: benchApiKey,
+    batch: shard?.group_id,
+    shard: shard
+      ? { index: shard.shard_index, count: shard.shard_count }
+      : undefined,
+    captureOutput: COORDINATOR_LOG_PATH
+      ? { file: COORDINATOR_LOG_PATH }
+      : undefined,
+  } as any);
   const uploadLog = async (): Promise<void> => {
     if (!COORDINATOR_LOG_PATH) return;
     try {
@@ -220,32 +235,49 @@ async function main() {
   log.phase('initializing compute client');
   const compute = provider.createCompute();
   log.ok(`compute client ready for ${PROVIDER}`);
+  if (benchApiUrl) {
+    log.info(`bench ingest enabled via ${benchApiUrl}`);
+  }
 
   try {
-    log.phase(`burst — firing ${provider.concurrencyTarget} requests at t=0 (no stagger)`);
-    await runBurst(provider, compute, {
-      async onResult(result) {
-        statusCounts[result.status]++;
-        if (result.status === 'success') {
-          okResults.push({
-            idx: result.sandbox_idx,
-            ms: result.latency_ms,
-            first_command_ms: result.first_command_ms,
+    const runBurstWithSinks = async () => {
+      log.phase(`burst — firing ${provider.concurrencyTarget} requests at t=0 (no stagger)`);
+      await runBurst(provider, compute, {
+        async onResult(result) {
+          statusCounts[result.status]++;
+          if (result.status === 'success') {
+            okResults.push({
+              idx: result.sandbox_idx,
+              ms: result.latency_ms,
+              first_command_ms: result.first_command_ms,
+            });
+          } else if (result.status === 'failed' && result.failure_class) {
+            createFailureClass[result.failure_class]++;
+          }
+          intervals.push({
+            start: Date.parse(result.started_at),
+            end: Date.parse(result.completed_at),
           });
-        } else if (result.status === 'failed' && result.failure_class) {
-          createFailureClass[result.failure_class]++;
-        }
-        intervals.push({
-          start: Date.parse(result.started_at),
-          end: Date.parse(result.completed_at),
-        });
-        tigris.writeResult(result);
-        await pg.write(result);
-      },
-      onProgress(stats) {
-        lastStats = stats;
-      },
-    });
+          tigris.writeResult(result);
+          await pg.write(result);
+        },
+        onProgress(stats) {
+          lastStats = stats;
+        },
+      });
+    };
+
+    const benchAny = bench as any;
+    if (typeof benchAny.add === 'function' && typeof benchAny.run === 'function') {
+      benchAny.add(`scale.${PROVIDER}.burst`, runBurstWithSinks);
+      await benchAny.run({ iterations: 1, warmup: 0, provider: PROVIDER });
+    } else {
+      await benchAny.run(`scale.${PROVIDER}.burst`, runBurstWithSinks, {
+        iterations: 1,
+        warmup: 0,
+        provider: PROVIDER,
+      });
+    }
 
     clearInterval(heartbeat);
 
