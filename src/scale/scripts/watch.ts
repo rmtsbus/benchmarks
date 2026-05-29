@@ -6,7 +6,7 @@
  * at a fixed interval, prints a status table, and exits when every watched
  * run is terminal. Exit code: 0 if all succeeded, 1 if any failed.
  *
- * Loads .env via dotenv so BENCHMARK_INGEST_URL works the same way as the
+ * Loads .env via dotenv so COMPUTESDK_API_KEY works the same way as the
  * runtime sees it.
  *
  * Usage:
@@ -85,9 +85,7 @@ function parseArgs(): Args {
 
 const args = parseArgs();
 
-const queryUrl = process.env.BENCHMARK_QUERY_URL
-  ?? process.env.BENCHMARK_INGEST_URL?.replace(/\/events\/?$/, '')
-  ?? DEFAULT_QUERY_URL;
+const queryUrl = process.env.BENCHMARK_QUERY_URL ?? DEFAULT_QUERY_URL;
 const apiKey = process.env.COMPUTESDK_API_KEY;
 const query = createBenchQueryClient(queryUrl, apiKey);
 

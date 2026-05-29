@@ -44,8 +44,7 @@ async function main() {
   })();
 
   const provider = getProvider(PROVIDER);
-  const benchApiUrl = process.env.BENCHMARK_INGEST_URL;
-  const benchApiKey = process.env.BENCHMARK_INGEST_API_KEY;
+  const benchApiKey = process.env.COMPUTESDK_API_KEY;
 
   // Allow env override of concurrencyTarget for local smoke tests.
   const override = process.env.CONCURRENCY_TARGET;
@@ -120,7 +119,6 @@ async function main() {
   const bench = createBench({
     label: `scale.${PROVIDER}`,
     provider: PROVIDER,
-    apiUrl: benchApiUrl,
     apiKey: benchApiKey,
     batch: shard?.group_id,
     shard: shard
@@ -216,8 +214,8 @@ async function main() {
   log.phase('initializing compute client');
   const compute = provider.createCompute();
   log.ok(`compute client ready for ${PROVIDER}`);
-  if (benchApiUrl) {
-    log.info(`bench ingest enabled via ${benchApiUrl}`);
+  if (benchApiKey) {
+    log.info('bench ingest enabled');
   }
 
   try {

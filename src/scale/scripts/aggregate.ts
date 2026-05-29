@@ -51,7 +51,7 @@ function usage(): string {
     '  --help, -h             Print this help',
     '',
     'Required env:',
-    '  BENCHMARK_INGEST_URL  (or BENCHMARK_QUERY_URL)',
+    '  BENCHMARK_QUERY_URL   Bench API query endpoint',
     '  COMPUTESDK_API_KEY    (optional if query endpoint is public)',
     '',
     'Tigris env (if --no-tigris not passed):',
@@ -83,9 +83,7 @@ function parseArgs(): Args {
 
 const args = parseArgs();
 
-const queryUrl = process.env.BENCHMARK_QUERY_URL
-  ?? process.env.BENCHMARK_INGEST_URL?.replace(/\/events\/?$/, '')
-  ?? DEFAULT_QUERY_URL;
+const queryUrl = process.env.BENCHMARK_QUERY_URL ?? DEFAULT_QUERY_URL;
 const apiKey = process.env.COMPUTESDK_API_KEY;
 const query = createBenchQueryClient(queryUrl, apiKey);
 
