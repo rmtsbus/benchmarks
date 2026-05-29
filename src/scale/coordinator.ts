@@ -43,6 +43,7 @@ async function main() {
 
   const provider = getProvider(PROVIDER);
   const benchApiKey = process.env.COMPUTESDK_API_KEY;
+  const LABEL = process.env.LABEL ?? `scale.${PROVIDER}`;
 
   // Allow env override of concurrencyTarget for local smoke tests.
   const override = process.env.CONCURRENCY_TARGET;
@@ -52,6 +53,7 @@ async function main() {
 
   log.phase('scale coordinator starting');
   log.info(`run_id=${RUN_ID}`);
+  log.info(`label=${LABEL}`);
   log.info(`provider=${PROVIDER} (requires: ${provider.requiredEnvVars.join(', ') || 'none'})`);
   log.info(`concurrency=${provider.concurrencyTarget} timeout=${provider.perRequestTimeoutMs ?? 120_000}ms`);
   log.info(`commit_sha=${commit_sha} instance_id=${instance_id}`);
@@ -107,7 +109,7 @@ async function main() {
   // is unset (e.g. local `npm run bench:scale:local` runs).
   const COORDINATOR_LOG_PATH = process.env.COORDINATOR_LOG_PATH;
   const bench = createBench({
-    label: `scale.${PROVIDER}`,
+    label: LABEL,
     provider: PROVIDER,
     apiKey: benchApiKey,
     batch: shard?.group_id,

@@ -83,8 +83,7 @@ function parseArgs(): Args {
 
 const args = parseArgs();
 
-const queryUrl = QUERY_URL;
-const query = createBenchQueryClient(process.env.COMPUTESDK_API_KEY);
+const query = createBenchQueryClient('https://platform.computesdk.com/api/v1', process.env.COMPUTESDK_API_KEY);
 
 // Resolve --recent into RUN_IDs
 let watchIds = [...args.runIds];
@@ -135,21 +134,29 @@ async function fetchRuns(ids: string[]): Promise<WatchRow[]> {
 async function fetchBatch(batchId: string): Promise<WatchRow[]> {
   const progress = await query.getBatchProgress(batchId);
 
+  // BenchBatchProgress carries only per-run counters; roll them up. A run is
+  // terminal once done >= total (run summaries don't expose lifecycle state).
+  let done = 0, total = 0, errors = 0, inFlight = 0, running = 0, failed = 0;
+  for (const r of progress.runs) {
+    done += r.done; total += r.total; errors += r.errors; inFlight += r.inFlight;
+    const terminal = r.total > 0 && r.done >= r.total;
+    if (!terminal) running++;
+    else if (r.errors > 0) failed++;
+  }
+
   // One synthetic row for the whole batch
   return [{
     id: batchId,
-    status: progress.runBreakdown.failed > 0 ? 'failed'
-      : progress.runBreakdown.running > 0 ? 'running'
-      : 'completed',
-    done: progress.done,
-    total: progress.total,
-    errors: progress.errors,
-    inFlight: progress.inFlight,
+    status: failed > 0 ? 'failed' : running > 0 ? 'running' : 'completed',
+    done,
+    total,
+    errors,
+    inFlight,
   }];
 }
 
 function pad(s: string | number | null, n: number, align: 'l' | 'r' = 'l'): string {
-  const v = s == null ? '-' : String(v);
+  const v = s == null ? '-' : String(s);
   return align === 'l' ? v.padEnd(n) : v.padStart(n);
 }
 

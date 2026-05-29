@@ -80,8 +80,7 @@ function parseArgs(): Args {
 
 const args = parseArgs();
 
-const queryUrl = QUERY_URL;
-const query = createBenchQueryClient(process.env.COMPUTESDK_API_KEY);
+const query = createBenchQueryClient('https://platform.computesdk.com/api/v1', process.env.COMPUTESDK_API_KEY);
 
 // Resolve groupId (either explicit or most recent)
 let groupId = args.groupId;
@@ -99,55 +98,84 @@ if (!groupId) {
 const [stats, progress, runsRes] = await Promise.all([
   query.getBatchStats(groupId),
   query.getBatchProgress(groupId),
-  query.listRuns({ batch: groupId, limit: 1000 }),
+  query.listRuns({ batch: groupId, limit: 500 }),
 ]);
 
-if (progress.runBreakdown.running > 0 && args.requireTerminal) {
+// BenchBatchProgress carries only per-run counters (no roll-up), so derive the
+// shard-level breakdown. A run is terminal once done >= total — the same
+// inference watch.ts uses, since run summaries don't expose lifecycle state.
+let shardsRunning = 0, shardsCompleted = 0, shardsFailed = 0;
+for (const r of progress.runs) {
+  const terminal = r.total > 0 && r.done >= r.total;
+  if (!terminal) shardsRunning++;
+  else if (r.errors > 0) shardsFailed++;
+  else shardsCompleted++;
+}
+const shardsTerminal = shardsCompleted + shardsFailed;
+
+if (shardsRunning > 0 && args.requireTerminal) {
   console.error(
-    `batch ${groupId} has ${progress.runBreakdown.running} shard(s) still running; ` +
+    `batch ${groupId} has ${shardsRunning} shard(s) still running; ` +
     `pass --allow-running to aggregate anyway`,
   );
   console.error(`still-running shards:`);
-  for (const r of runsRes.items.filter((r: BenchRunSummary) => r.status !== 'completed' && r.status !== 'failed')) {
-    console.error(`  ${r.runId} (status=${r.status})`);
+  for (const r of progress.runs.filter(r => !(r.total > 0 && r.done >= r.total))) {
+    console.error(`  ${r.runId} (${r.done}/${r.total} done, ${r.errors} errors)`);
   }
   process.exit(1);
 }
 
-const totalSpans = stats.totalSpans;
-const statusCounts = stats.statusCounts;
-const latencyDistribution = stats.latencyDistribution;
-const failureBreakdown = stats.failureBreakdown;
+// The batch-stats endpoint only distinguishes ok vs error spans. The finer
+// 'partial' / 'readiness_failed' split the unsharded coordinator records is not
+// recoverable here, so those buckets are reported as 0 and `failures` carries
+// the full non-success count.
+const succeeded = stats.statusCounts.ok;
+const failed = stats.statusCounts.error;
+const latency = stats.latencyDistribution;
+
+// failureBreakdown is Array<{errorCode, count}>. Keep the raw per-code map and
+// classify into the legacy timeout/http_error/network_error buckets by errorCode;
+// codes matching none are summed into `other`.
+const failuresByCode: Record<string, number> = {};
+let timeouts = 0, httpErrors = 0, networkErrors = 0, otherErrors = 0;
+for (const { errorCode, count } of stats.failureBreakdown) {
+  failuresByCode[errorCode] = (failuresByCode[errorCode] ?? 0) + count;
+  const c = errorCode.toLowerCase();
+  if (c.includes('timeout') || c === 'etimedout') timeouts += count;
+  else if (c.includes('http') || /^\d{3}$/.test(errorCode)) httpErrors += count;
+  else if (c.includes('network') || c.includes('econn') || c.includes('socket') || c.includes('dns')) networkErrors += count;
+  else otherErrors += count;
+}
 
 const provider = [...new Set(runsRes.items.map((r: BenchRunSummary) => r.provider).filter(Boolean))].join(',') || 'unknown';
 
 const final = {
-  sandboxes_attempted: totalSpans,
-  sandboxes_succeeded: statusCounts.success ?? 0,
-  partials: statusCounts.partial ?? 0,
-  readiness_failures: statusCounts.readiness_failed ?? 0,
-  failures: statusCounts.failed ?? 0,
-  timeouts: failureBreakdown.timeout ?? 0,
-  http_errors: failureBreakdown.http_error ?? 0,
-  network_errors: failureBreakdown.network_error ?? 0,
-  p50_latency_ms: latencyDistribution.p50 ?? 0,
-  p99_latency_ms: latencyDistribution.p99 ?? 0,
+  sandboxes_attempted: stats.totalSpans,
+  sandboxes_succeeded: succeeded,
+  partials: 0,            // not exposed by the batch-stats endpoint
+  readiness_failures: 0,  // not exposed by the batch-stats endpoint
+  failures: failed,
+  timeouts,
+  http_errors: httpErrors,
+  network_errors: networkErrors,
+  p50_latency_ms: latency.p50,
+  p99_latency_ms: latency.p99,
 };
 
 const aggregate = {
   ...final,
-  latency_distribution: latencyDistribution,
+  latency_distribution: latency,
   status_histogram: {
-    success: statusCounts.success ?? 0,
-    partial: statusCounts.partial ?? 0,
-    readiness_failed: statusCounts.readiness_failed ?? 0,
-    failed: statusCounts.failed ?? 0,
+    ok: succeeded,
+    error: failed,
   },
   create_failure_class: {
-    timeout: failureBreakdown.timeout ?? 0,
-    http_error: failureBreakdown.http_error ?? 0,
-    network_error: failureBreakdown.network_error ?? 0,
+    timeout: timeouts,
+    http_error: httpErrors,
+    network_error: networkErrors,
+    other: otherErrors,
   },
+  failure_breakdown_by_code: failuresByCode,
   // TODO: backend currently does not expose first_command_distribution,
   // tti_distribution, submission_segments, or concurrency timeline.
   // Once the API adds them, map them in here.
@@ -161,7 +189,6 @@ const aggregate = {
   shard_count: runsRes.items.length,
   shards: runsRes.items.map((r: BenchRunSummary) => ({
     run_id: r.runId,
-    shard_index: r.batch ?? null,
     status: r.status,
     started_at: r.startedAt,
     ended_at: r.endedAt ?? null,
@@ -181,22 +208,19 @@ console.log(rule);
 console.log(` aggregate :: ${groupId}`);
 console.log(rule);
 console.log(`  provider:         ${provider}`);
-console.log(`  shards:           ${progress.runBreakdown.completed + progress.runBreakdown.failed}/${progress.runBreakdown.completed + progress.runBreakdown.failed + progress.runBreakdown.running} ` +
-  (progress.runBreakdown.running > 0 ? `(${progress.runBreakdown.running} still running)` : '(all terminal)'));
+console.log(`  shards:           ${shardsTerminal}/${progress.runs.length} ` +
+  (shardsRunning > 0 ? `(${shardsRunning} still running)` : '(all terminal)'));
 console.log(`  attempted:        ${final.sandboxes_attempted.toLocaleString()}`);
 console.log(`  succeeded:        ${final.sandboxes_succeeded.toLocaleString()} ` +
   `(${((final.sandboxes_succeeded / Math.max(1, final.sandboxes_attempted)) * 100).toFixed(2)}%)`);
-console.log(`  partial:          ${final.partials.toLocaleString()}`);
-console.log(`  readiness_failed: ${final.readiness_failures.toLocaleString()}`);
-console.log(`  failed (create):  ${final.failures.toLocaleString()} ` +
-  `(timeouts=${final.timeouts} http=${final.http_errors} network=${final.network_errors})`);
+console.log(`  failed:           ${final.failures.toLocaleString()} ` +
+  `(timeouts=${final.timeouts} http=${final.http_errors} network=${final.network_errors}` +
+  (otherErrors > 0 ? ` other=${otherErrors}` : '') + `)`);
 console.log('');
-console.log(`  allocate-phase latency (status='success' only):`);
-console.log(`    p50:  ${final.p50_latency_ms}ms`);
-console.log(`    p99:  ${final.p99_latency_ms}ms`);
-if (latencyDistribution) {
-  console.log(`    min/mean/max: ${latencyDistribution.min}/${latencyDistribution.mean}/${latencyDistribution.max}ms`);
-}
+console.log(`  allocate-phase latency (status='ok' only):`);
+console.log(`    p50:  ${latency.p50}ms`);
+console.log(`    p99:  ${latency.p99}ms`);
+console.log(`    min/avg/max: ${latency.min}/${latency.avg}/${latency.max}ms`);
 
 // ─── local file ──────────────────────────────────────────────────────────
 if (args.out) {

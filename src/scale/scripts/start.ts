@@ -123,6 +123,7 @@ interface Args {
   duration: string;
   machineType: string;
   groupId?: string;
+  label?: string;
 }
 
 function usage(): string {
@@ -140,6 +141,7 @@ function usage(): string {
     `  --duration <dur>       Namespace VM lifetime (default: 1h)`,
     `  --machine-type <type>  Namespace machine type (default: ${MACHINE_TYPE_DEFAULT})`,
     '  --group-id <id>        Override the generated GROUP_ID',
+    '  --label <name>         Override the bench run label (default: scale.<provider>)',
     '  --help, -h             Print this help',
     '',
     'Examples:',
@@ -166,6 +168,7 @@ function parseArgs(): Args {
     else if (a === '--duration') out.duration = next();
     else if (a === '--machine-type') out.machineType = next();
     else if (a === '--group-id') out.groupId = next();
+    else if (a === '--label') out.label = next();
     else if (a === '--help' || a === '-h') { console.log(usage()); process.exit(0); }
     else { console.error(`unknown arg: ${a}\n${usage()}`); process.exit(2); }
   }
@@ -193,6 +196,7 @@ interface ShardOpts {
   duration: string;
   machineType: string;
   githubSha: string;
+  label?: string;
   // Sharded metadata; undefined for single-VM runs.
   groupId?: string;
   shardIndex?: number;
@@ -229,6 +233,9 @@ async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<S
     ];
     if (process.env.COMPUTESDK_API_KEY) {
       runArgs.push('--env', `COMPUTESDK_API_KEY=${process.env.COMPUTESDK_API_KEY}`);
+    }
+    if (opts.label !== undefined) {
+      runArgs.push('--env', `LABEL=${opts.label}`);
     }
     if (opts.groupId !== undefined && opts.shardIndex !== undefined && opts.shardCount !== undefined) {
       runArgs.push('--env', `GROUP_ID=${opts.groupId}`);
@@ -312,6 +319,7 @@ async function main(): Promise<void> {
   console.log(`  duration:   ${args.duration}`);
   console.log(`  machine:    ${args.machineType}`);
   console.log(`  group_id:   ${groupId}`);
+  console.log(`  label:      ${args.label ?? `scale.${args.provider}`}`);
   console.log('');
 
   for (const v of ['TIGRIS_STORAGE_ENDPOINT', 'TIGRIS_STORAGE_BUCKET', 'TIGRIS_STORAGE_ACCESS_KEY_ID', 'TIGRIS_STORAGE_SECRET_ACCESS_KEY']) {
@@ -332,6 +340,7 @@ async function main(): Promise<void> {
         duration: args.duration,
         machineType: args.machineType,
         githubSha,
+        label: args.label,
         ...(sharded ? { groupId, shardIndex: i, shardCount: args.vms } : {}),
       };
       return launchOne(i, opts, log);
