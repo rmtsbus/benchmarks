@@ -105,9 +105,10 @@ async function main() {
   const createFailureClass = { timeout: 0, http_error: 0, network_error: 0 };
   const emittedSegmentCounts = { first_25pct: 0, middle_50pct: 0, last_25pct: 0 };
 
-  // Periodically upload the coordinator's own stdout/stderr (tee'd to a file by
-  // the uploaded /root/start.sh) to Tigris. Skipped silently when the env var
-  // is unset (e.g. local `npm run bench:scale:local` runs).
+  // Optional: also have the bench SDK mirror output to a file (off unless the
+  // env var is set). The coordinator.log uploaded to Tigris is captured
+  // independently by the logger's in-memory buffer (see log.dump()), so this is
+  // no longer required for Tigris log durability.
   const COORDINATOR_LOG_PATH = process.env.COORDINATOR_LOG_PATH;
   const bench = createBench({
     label: LABEL,
@@ -202,6 +203,7 @@ async function main() {
     try {
       await tigris.close();
       if (metricsSamples.length > 0) await tigris.writeMetrics(metricsSamples);
+      await tigris.writeLog(log.dump());
       log.ok('flushed all sinks');
     } catch (e: any) {
       log.error(`shutdown flush failed: ${e?.message ?? e}`);
@@ -537,12 +539,14 @@ async function main() {
       log.warn(`create-failure class: timeouts=${final.timeouts} http_errors=${final.http_errors} network_errors=${final.network_errors}`);
     }
     log.phase('flushing complete');
+    await tigris.writeLog(log.dump());
   } catch (err: any) {
     clearInterval(metricsInterval);
     log.error(`run failed: ${err?.message ?? err}`);
     try {
       await tigris.close();
       if (metricsSamples.length > 0) await tigris.writeMetrics(metricsSamples);
+      await tigris.writeLog(log.dump());
     } catch (e: any) {
       log.error(`failed to record failure: ${e?.message ?? e}`);
     }

@@ -12,11 +12,19 @@
 
 type Level = 'info' | 'ok' | 'warn' | 'error' | 'stat' | 'data' | 'debug';
 
+// In-memory mirror of every emitted line, uploaded to Tigris as coordinator.log
+// at shutdown. The container runs `node coordinator.cjs` directly (no wrapper
+// tee'ing stdout to a file), so the process must capture its own output. Lines
+// are already color-free, so the buffer is upload-clean as-is.
+const buffer: string[] = [];
+
 function write(level: Level, msg: string): void {
   const ts = new Date().toISOString();
   const tag = `[${level}]`.padEnd(7);
+  const line = `${ts} ${tag} ${msg}\n`;
+  buffer.push(line);
   const stream = level === 'error' || level === 'warn' ? process.stderr : process.stdout;
-  stream.write(`${ts} ${tag} ${msg}\n`);
+  stream.write(line);
 }
 
 export const log = {
@@ -38,4 +46,6 @@ export const log = {
     if (process.env.BURST_100K_DEBUG === '1') write('debug', msg);
   },
   phase(title: string): void { write('info', `━━━ ${title} ━━━`); },
+  /** Full transcript emitted so far, for uploading as coordinator.log. */
+  dump(): string { return buffer.join(''); },
 };

@@ -230,6 +230,9 @@ async function launchOne(shard: number, opts: ShardOpts, log: Logger): Promise<S
       '--env', `TIGRIS_STORAGE_ACCESS_KEY_ID=${process.env.TIGRIS_STORAGE_ACCESS_KEY_ID!}`,
       '--env', `TIGRIS_STORAGE_SECRET_ACCESS_KEY=${process.env.TIGRIS_STORAGE_SECRET_ACCESS_KEY!}`,
       '--env', `CONCURRENCY_TARGET=${opts.concurrencyTarget}`,
+      // Have the bench SDK tee the coordinator's output to a file in-container,
+      // in addition to the logger's in-memory buffer uploaded as coordinator.log.
+      '--env', `COORDINATOR_LOG_PATH=/tmp/coordinator.log`,
     ];
     if (process.env.COMPUTESDK_API_KEY) {
       runArgs.push('--env', `COMPUTESDK_API_KEY=${process.env.COMPUTESDK_API_KEY}`);
