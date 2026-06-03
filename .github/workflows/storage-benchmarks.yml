@@ -105,6 +105,11 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the rebase-on-push retry below has a merge base.
+          # A shallow (depth-1) clone can make `git rebase origin/<branch>`
+          # fail when the remote has advanced past the shallow boundary.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -228,13 +233,16 @@ jobs:
           # Rebase onto the latest remote and retry a few times before giving up.
           branch="${GITHUB_REF#refs/heads/}"
           for attempt in 1 2 3 4 5; do
+            # Rebase before each attempt (including the last) so every rebase
+            # is followed by a push — otherwise the final iteration's rebase
+            # would be wasted and a resolvable non-fast-forward could still fail.
+            git fetch origin "${branch}"
+            git rebase "origin/${branch}" || { git rebase --abort; exit 1; }
             if git push origin "HEAD:${branch}"; then
               echo "Pushed on attempt ${attempt}"
               exit 0
             fi
-            echo "Push rejected (attempt ${attempt}); rebasing onto origin/${branch}"
-            git fetch origin "${branch}"
-            git rebase "origin/${branch}" || { git rebase --abort; exit 1; }
+            echo "Push rejected (attempt ${attempt}); will rebase and retry"
           done
           echo "Failed to push after multiple attempts" >&2
           exit 1
