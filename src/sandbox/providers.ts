@@ -1,4 +1,5 @@
 import { archil } from '@computesdk/archil';
+import { beam } from '@computesdk/beam';
 import { blaxel } from '@computesdk/blaxel';
 import { codesandbox } from '@computesdk/codesandbox';
 import { cloudflare } from '@computesdk/cloudflare';
@@ -30,6 +31,12 @@ export const providers: ProviderConfig[] = [
     requiredEnvVars: ['ARCHIL_API_KEY', 'ARCHIL_REGION', 'ARCHIL_DISK_ID'],
     createCompute: () => archil({ apiKey: process.env.ARCHIL_API_KEY!, region: process.env.ARCHIL_REGION! }),
     sandboxOptions: { metadata: { diskId: process.env.ARCHIL_DISK_ID! } }
+  },
+  {
+    name: 'beam',
+    requiredEnvVars: ['BEAM_TOKEN', 'BEAM_WORKSPACE_ID'],
+    createCompute: () => beam({ token: process.env.BEAM_TOKEN!, workspaceId: process.env.BEAM_WORKSPACE_ID! }),
+    sandboxOptions: { name: 'computesdk-benchmarks-2' },
   },
   {
     name: 'blaxel',
