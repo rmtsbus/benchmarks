@@ -8,7 +8,7 @@ import { declaw } from '@computesdk/declaw';
 import { e2b } from '@computesdk/e2b';
 import { hopx } from '@computesdk/hopx';
 import { modal } from '@computesdk/modal';
-import { namespace } from '@computesdk/namespace';
+// import { namespace } from '@computesdk/namespace';
 import { northflank } from '@computesdk/northflank';
 // import { railway } from '@computesdk/railway';
 import { runloop } from '@computesdk/runloop';
@@ -79,12 +79,12 @@ export const providers: ProviderConfig[] = [
     requiredEnvVars: ['MODAL_TOKEN_ID', 'MODAL_TOKEN_SECRET'],
     createCompute: () => modal({ tokenId: process.env.MODAL_TOKEN_ID!, tokenSecret: process.env.MODAL_TOKEN_SECRET!, scalableSandboxes: true }),
   },
-  {
-    name: 'namespace',
-    requiredEnvVars: ['NSC_TOKEN'],
-    createCompute: () => namespace({ token: process.env.NSC_TOKEN! }),
-    sandboxOptions: { image: 'node:22' },
-  },
+  // {
+  //   name: 'namespace',
+  //   requiredEnvVars: ['NSC_TOKEN'],
+  //   createCompute: () => namespace({ token: process.env.NSC_TOKEN! }),
+  //   sandboxOptions: { image: 'node:22' },
+  // },
   {
     name: 'northflank',
     requiredEnvVars: ['NORTHFLANK_TOKEN', 'NORTHFLANK_PROJECT_ID'],

@@ -59,7 +59,7 @@ jobs:
           - e2b
           - hopx
           - modal
-          - namespace
+          # - namespace
           - northflank
           # - railway
           - runloop
@@ -101,7 +101,7 @@ jobs:
           HOPX_API_KEY: ${{ secrets.HOPX_API_KEY }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          NSC_TOKEN: ${{ secrets.NSC_TOKEN }}
+          # NSC_TOKEN: ${{ secrets.NSC_TOKEN }}
           NORTHFLANK_TOKEN: ${{ secrets.NORTHFLANK_TOKEN }}
           NORTHFLANK_PROJECT_ID: ${{ secrets.NORTHFLANK_PROJECT_ID }}
           # RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
