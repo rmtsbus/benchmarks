@@ -182,6 +182,34 @@ export class BenchReporter {
     }
   }
 
+  /**
+   * Report this worker as waiting at a platform-coordinated step barrier, then
+   * poll until the participant reaches its aggregate target across all workers.
+   */
+  async waitForStepReady(step: string, timeoutMs: number, pollIntervalMs = 1_000, active = this.total): Promise<void> {
+    await this.client.heartbeatWorker(this.cfg.benchmarkSlug, this.cfg.runId, this.assignment.workerId, {
+      attemptId: this.assignment.attemptId,
+      progressDone: this.lastStats.done,
+      progressInFlight: this.lastStats.in_flight,
+      progressErrors: this.lastStats.errors,
+      progressTotal: this.total,
+      currentStep: step,
+      concurrency: [{ step, active, target: this.total }],
+    });
+
+    const started = Date.now();
+    while (true) {
+      const progress = await this.client.getRunProgress(this.cfg.benchmarkSlug, this.cfg.runId);
+      const participant = progress.participants.find(item => item.slug === this.cfg.participantSlug);
+      const concurrency = participant?.concurrency.find(item => item.step === step);
+      if (concurrency?.ready) return;
+      if (Date.now() - started >= timeoutMs) {
+        throw new Error(`Timed out waiting for benchmark step "${step}" to become ready`);
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+  }
+
   /** Serialize `sendTaskResults` so sequenceNumbers stay ordered. */
   private flush(isFinal: boolean): Promise<void> {
     this.flushChain = this.flushChain.then(async () => {

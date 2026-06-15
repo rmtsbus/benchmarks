@@ -248,6 +248,12 @@ async function main() {
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   })();
+  const barrierTimeoutMs = (() => {
+    const raw = process.env.SCALE_BARRIER_TIMEOUT_MS;
+    if (!raw) return 15 * 60_000;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60_000;
+  })();
 
   try {
     const flow = new BurstLifecycle(provider, compute, {
@@ -303,12 +309,37 @@ async function main() {
     // `runOnFailed` behaviour) and survivors are torn down regardless of phase-1
     // outcome.
     const indices = Array.from({ length: burstSize }, (_, i) => i);
-    const runStage = (fn: (idx: number) => Promise<void>): Promise<void[]> =>
-      Promise.all(indices.map(fn));
+    const runStage = async (fn: (idx: number) => Promise<void>): Promise<void[]> => {
+      const promises = indices.map(fn);
+      if (bench) await bench.heartbeat(lastStats.in_flight);
+      const results = await Promise.all(promises);
+      if (bench) await bench.heartbeat(lastStats.in_flight);
+      return results;
+    };
+
+    if (bench) {
+      log.phase(`create barrier — waiting for all workers (timeout=${barrierTimeoutMs}ms)`);
+      await bench.waitForStepReady('create.barrier', barrierTimeoutMs);
+    } else {
+      log.warn('create barrier skipped: no claimed bench worker');
+    }
 
     log.phase(`create — firing ${burstSize} requests at t=0 (no stagger)`);
     await runStage((i) => flow.createOne(i));
     await runStage((i) => flow.execInitialOne(i));
+
+    if (bench) {
+      const survivors = flow.countSurvivors();
+      log.phase(`ready barrier — ${survivors}/${burstSize} alive; waiting for global target`);
+      try {
+        await bench.waitForStepReady('ready.barrier', barrierTimeoutMs, 1_000, survivors);
+      } catch (err) {
+        log.error('ready barrier failed — destroying surviving sandboxes before exit');
+        await Promise.all(indices.map(i => flow.destroyOne(i)));
+        throw err;
+      }
+    }
+
     if (pauseMs > 0) {
       log.phase(`pause — waiting ${pauseMs}ms`);
       await flow.pause(pauseMs);

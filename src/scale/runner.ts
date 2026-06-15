@@ -63,6 +63,7 @@ export class BurstLifecycle {
   async createOne(idx: number): Promise<void> {
     const { sandboxOptions, perRequestTimeoutMs = 120_000 } = this.config;
     this.in_flight++;
+    this.callbacks.onProgress({ done: this.done, in_flight: this.in_flight, errors: this.errors });
     const started_at = new Date().toISOString();
     const t0 = performance.now();
 
