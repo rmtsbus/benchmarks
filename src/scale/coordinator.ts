@@ -6,7 +6,7 @@ import { BenchReporter } from './bench-reporter.js';
 import { getProvider } from './providers.js';
 import { log } from './logger.js';
 import { BurstLifecycle } from './runner.js';
-import type { ProgressStats, MetricsSample } from './types.js';
+import type { ProgressStats, MetricsSample, GlobalConcurrency } from './types.js';
 
 // dotenv only matters for local invocation. In production the env is set by
 // scripts/start.ts via the uploaded /root/start.sh (`export VAR=...`).
@@ -328,11 +328,30 @@ async function main() {
     await runStage((i) => flow.createOne(i));
     await runStage((i) => flow.execInitialOne(i));
 
+    // True fleet-wide peak concurrency, measured at the ready-barrier hold.
+    // Null on bare local runs (no claimed worker, so no aggregate to read).
+    let global_concurrency: GlobalConcurrency | null = null;
     if (bench) {
       const survivors = flow.countSurvivors();
-      log.phase(`ready barrier — ${survivors}/${burstSize} alive; waiting for global target`);
+      // Arrival barrier: report the full intended count (the default `active`),
+      // NOT the live survivor count. This is a *worker*-level barrier — every
+      // worker reaches this line regardless of how many of its sandboxes failed,
+      // so the aggregate hits target on arrival. Reporting `survivors` instead
+      // would make the aggregate fall short of target on any failure and the
+      // platform's `active >= target` gate would never fire (deadlock → timeout).
+      log.phase(`ready barrier — ${survivors}/${burstSize} alive; waiting for all workers`);
       try {
-        await bench.waitForStepReady('ready.barrier', barrierTimeoutMs, 1_000, survivors);
+        // At release every shard is holding simultaneously, so the platform's
+        // aggregated in-flight count is the true fleet-wide live concurrency.
+        const hold = await bench.waitForStepReady('ready.barrier', barrierTimeoutMs);
+        global_concurrency = {
+          peak_concurrent: hold.globalInFlight ?? survivors,
+          target: hold.globalTotal,
+          source: hold.globalInFlight != null ? 'platform' : 'unavailable',
+          measured_at: new Date().toISOString(),
+        };
+        log.ok(`global concurrency at hold: ${global_concurrency.peak_concurrent}/${global_concurrency.target} ` +
+          `alive across all shards (source=${global_concurrency.source})`);
       } catch (err) {
         log.error('ready barrier failed — destroying surviving sandboxes before exit');
         await Promise.all(indices.map(i => flow.destroyOne(i)));
@@ -522,6 +541,7 @@ async function main() {
       create_failure_class,
       submission_segments,
       concurrency_summary,
+      global_concurrency,
       concurrency_timeline,
       metrics_summary,
       run_id: RUN_ID,

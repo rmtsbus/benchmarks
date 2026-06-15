@@ -85,6 +85,26 @@ export interface MetricsSample {
   sockstat: Record<string, number> | null;
 }
 
+/**
+ * True fleet-wide peak concurrency, captured at the synchronized `ready.barrier`
+ * hold. Because that barrier holds every shard's survivors alive at the same
+ * instant, the platform's aggregated in-flight count at barrier release equals
+ * the number of sandboxes simultaneously alive across ALL shards — the real
+ * "N concurrent" number, as opposed to the per-shard interval-overlap estimate
+ * in `concurrency_summary`.
+ */
+export interface GlobalConcurrency {
+  /** Aggregate sandboxes simultaneously alive across all shards at the hold. */
+  peak_concurrent: number;
+  /** Global target == participant total tasks across all shards. */
+  target: number;
+  /** Provenance of the measurement. `platform` = read from the orchestrator's
+   *  aggregated progress; `unavailable` = no claimed worker (bare local run). */
+  source: 'platform' | 'unavailable';
+  /** ISO-8601 — when the barrier released and the measurement was taken. */
+  measured_at: string;
+}
+
 export interface FinalStats {
   sandboxes_attempted: number;
   /** count of status='success' */

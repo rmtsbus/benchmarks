@@ -48,6 +48,15 @@ export interface BenchReporterConfig {
   batchSize?: number;
 }
 
+/** Snapshot taken at the moment a step barrier releases (`ready` flips true). */
+export interface StepReadyResult {
+  /** Platform-aggregated in-flight count across all shards at release — the
+   *  true fleet-wide live concurrency. Null when the platform omitted it. */
+  globalInFlight: number | null;
+  /** Global target == participant total tasks across all shards. */
+  globalTotal: number;
+}
+
 /** Maps one finalized SandboxResult onto the platform's task-result shape. */
 function toTaskRecord(r: SandboxResult, baseIdx: number, extraData?: JsonObject): TaskResultRecord {
   // Per-step records let `getRunResults().steps[]` report create / readiness
@@ -101,6 +110,12 @@ export class BenchReporter {
   private sequenceNumber = 0;
   private flushChain: Promise<void> = Promise.resolve();
   private lastStats: ProgressStats = { done: 0, in_flight: 0, errors: 0 };
+  // While a step barrier is being awaited, every heartbeat (including the
+  // periodic one) must keep re-reporting that step's concurrency sample.
+  // Otherwise the periodic heartbeat overwrites the worker's snapshot with
+  // `lifecycle`/`[]` and the platform stops seeing this worker at the barrier,
+  // so the aggregate never reaches target and `ready` never latches.
+  private barrier: { step: string; active: number } | null = null;
 
   private constructor(client: BenchmarkClient, cfg: BenchReporterConfig, assignment: BenchmarkAssignment) {
     this.client = client;
@@ -166,6 +181,14 @@ export class BenchReporter {
 
   /** Send a progress + concurrency heartbeat (best-effort). */
   async heartbeat(activeInFlight: number): Promise<void> {
+    // A barrier wait takes precedence: keep this worker visible at the barrier
+    // step so the periodic heartbeat reinforces (rather than overwrites) the
+    // sample that `waitForStepReady` is polling on.
+    const concurrency = this.barrier
+      ? { currentStep: this.barrier.step, concurrency: [{ step: this.barrier.step, active: this.barrier.active, target: this.total }] }
+      : activeInFlight > 0
+        ? { currentStep: 'lifecycle', concurrency: [{ step: 'lifecycle', active: activeInFlight, target: this.total }] }
+        : { concurrency: [] };
     try {
       await this.client.heartbeatWorker(this.cfg.benchmarkSlug, this.cfg.runId, this.assignment.workerId, {
         attemptId: this.assignment.attemptId,
@@ -173,9 +196,7 @@ export class BenchReporter {
         progressInFlight: this.lastStats.in_flight,
         progressErrors: this.lastStats.errors,
         progressTotal: this.total,
-        ...(activeInFlight > 0
-          ? { currentStep: 'lifecycle', concurrency: [{ step: 'lifecycle', active: activeInFlight, target: this.total }] }
-          : { concurrency: [] }),
+        ...concurrency,
       });
     } catch {
       /* best-effort */
@@ -186,27 +207,50 @@ export class BenchReporter {
    * Report this worker as waiting at a platform-coordinated step barrier, then
    * poll until the participant reaches its aggregate target across all workers.
    */
-  async waitForStepReady(step: string, timeoutMs: number, pollIntervalMs = 1_000, active = this.total): Promise<void> {
-    await this.client.heartbeatWorker(this.cfg.benchmarkSlug, this.cfg.runId, this.assignment.workerId, {
-      attemptId: this.assignment.attemptId,
-      progressDone: this.lastStats.done,
-      progressInFlight: this.lastStats.in_flight,
-      progressErrors: this.lastStats.errors,
-      progressTotal: this.total,
-      currentStep: step,
-      concurrency: [{ step, active, target: this.total }],
-    });
-
+  async waitForStepReady(
+    step: string,
+    timeoutMs: number,
+    pollIntervalMs = 1_000,
+    active = this.total,
+  ): Promise<StepReadyResult> {
+    // Mark the barrier active so the periodic heartbeat keeps re-reporting this
+    // step (see `heartbeat`) and never clobbers our sample while we wait.
+    this.barrier = { step, active };
     const started = Date.now();
-    while (true) {
-      const progress = await this.client.getRunProgress(this.cfg.benchmarkSlug, this.cfg.runId);
-      const participant = progress.participants.find(item => item.slug === this.cfg.participantSlug);
-      const concurrency = participant?.concurrency.find(item => item.step === step);
-      if (concurrency?.ready) return;
-      if (Date.now() - started >= timeoutMs) {
-        throw new Error(`Timed out waiting for benchmark step "${step}" to become ready`);
+    try {
+      while (true) {
+        // Re-announce every tick: a single up-front heartbeat can age out of the
+        // platform's freshness window before the whole fleet arrives, so the
+        // worker would silently stop counting toward the aggregate.
+        await this.client.heartbeatWorker(this.cfg.benchmarkSlug, this.cfg.runId, this.assignment.workerId, {
+          attemptId: this.assignment.attemptId,
+          progressDone: this.lastStats.done,
+          progressInFlight: this.lastStats.in_flight,
+          progressErrors: this.lastStats.errors,
+          progressTotal: this.total,
+          currentStep: step,
+          concurrency: [{ step, active, target: this.total }],
+        });
+
+        const progress = await this.client.getRunProgress(this.cfg.benchmarkSlug, this.cfg.runId);
+        const participant = progress.participants.find(item => item.slug === this.cfg.participantSlug);
+        const concurrency = participant?.concurrency.find(item => item.step === step);
+        if (concurrency?.ready) {
+          // At release every shard is holding its survivors simultaneously, so
+          // the aggregated in-flight count is the true fleet-wide live
+          // concurrency. totalTasks is the global target across all shards.
+          return {
+            globalInFlight: participant?.tasks?.inFlight ?? null,
+            globalTotal: participant?.totalTasks ?? this.total,
+          };
+        }
+        if (Date.now() - started >= timeoutMs) {
+          throw new Error(`Timed out waiting for benchmark step "${step}" to become ready`);
+        }
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
       }
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    } finally {
+      this.barrier = null;
     }
   }
 
