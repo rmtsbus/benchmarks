@@ -1,9 +1,12 @@
 import { config as loadDotenv } from 'dotenv';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { createBenchmarkClient, defineStep, defineTask, runBenchmarkWorker } from '@computesdk/bench';
 import type { BenchmarkAssignment, JsonObject, TaskResultRecord, TaskStepRecord } from '@computesdk/bench';
 import { getProvider } from './providers.js';
 import { log } from './logger.js';
-import type { FailureClass, SandboxResult, SandboxResultStatus } from './types.js';
+import type { FailureClass, MetricsSample, SandboxResult, SandboxResultStatus } from './types.js';
 import {
   FIRST_COMMAND_TIMEOUT_MS,
   LIVENESS_CHECK_TIMEOUT_MS,
@@ -13,9 +16,20 @@ import {
 
 loadDotenv();
 
+const METRICS_SAMPLE_MS = 200;
+
 type SandboxState = {
   sandbox?: any;
 };
+
+type PreparedArtifact = {
+  kind: string;
+  name: string;
+  contentType: string;
+  uploadUrl: string;
+};
+
+type PreparedArtifacts = Partial<Record<'raw' | 'meta' | 'metrics' | 'log', PreparedArtifact>>;
 
 async function main() {
   const PROVIDER = required('PROVIDER');
@@ -53,9 +67,19 @@ async function main() {
   log.ok(`compute client ready for ${PROVIDER}`);
   const benchClient = createBenchmarkClient({ apiKey: process.env.COMPUTESDK_API_KEY ?? process.env.COMPUTESDK_ADMIN_API_KEY });
   const sandboxResults: SandboxResult[] = [];
+  const metricsStartedAt = Date.now();
+  const metricsSamples: MetricsSample[] = [];
+  const eloopHist = monitorEventLoopDelay({ resolution: 20 });
+  eloopHist.enable();
+  const cpuBaseline = process.cpuUsage();
+  const metricsInterval = setInterval(() => {
+    sampleMetrics();
+  }, METRICS_SAMPLE_MS);
+  let preparedArtifacts: Promise<PreparedArtifacts> | null = null;
 
   const task = defineTask<SandboxState>('sandbox.lifecycle', [
-    defineStep<SandboxState>('create', { reportConcurrency: false }, async ({ state, taskIndex }) => {
+    defineStep<SandboxState>('create', { reportConcurrency: false }, async ({ assignment, state, taskIndex }) => {
+      preparedArtifacts ??= prepareArtifacts({ assignment, benchmarkSlug, runId: BENCHMARK_RUN_ID, client: benchClient });
       state.sandbox = await withTimeout(
         compute.sandbox.create(provider.sandboxOptions),
         provider.perRequestTimeoutMs ?? 120_000,
@@ -110,6 +134,8 @@ async function main() {
     log.warn('bench: no pending worker to claim');
     process.exit(0);
   }
+  clearInterval(metricsInterval);
+  sampleMetrics();
 
   const errors = result.records.filter(record => record.status !== 'success').length;
   log.phase('run complete');
@@ -124,9 +150,38 @@ async function main() {
     logicalRunId: RUN_ID,
     target: provider.concurrencyTarget,
     results: sandboxResults,
+    metricsSamples,
     client: benchClient,
+    prepared: preparedArtifacts ? await preparedArtifacts : null,
   });
   process.exit(errors > 0 ? 1 : 0);
+
+  function sampleMetrics(): MetricsSample {
+    const cpu = process.cpuUsage(cpuBaseline);
+    const mem = process.memoryUsage();
+    const load = os.loadavg();
+    const sample: MetricsSample = {
+      ts: new Date().toISOString(),
+      uptime_ms: Date.now() - metricsStartedAt,
+      cpu_user_us: cpu.user,
+      cpu_system_us: cpu.system,
+      mem_rss_mb: Math.round(mem.rss / 1024 / 1024),
+      mem_heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+      mem_heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
+      mem_external_mb: Math.round(mem.external / 1024 / 1024),
+      event_loop_p50_ms: eloopHist.percentile(50) / 1e6,
+      event_loop_p99_ms: eloopHist.percentile(99) / 1e6,
+      event_loop_max_ms: eloopHist.max / 1e6,
+      loadavg_1m: load[0],
+      loadavg_5m: load[1],
+      loadavg_15m: load[2],
+      open_fds: countOpenFds(),
+      sockstat: readSockstat(),
+    };
+    eloopHist.reset();
+    metricsSamples.push(sample);
+    return sample;
+  }
 }
 
 function normalizeTaskRecord(record: TaskResultRecord): SandboxResult {
@@ -138,6 +193,7 @@ function normalizeTaskRecord(record: TaskResultRecord): SandboxResult {
   const lifecycleStatus = lifecycleStatusFor(failedStep?.name);
 
   record.status = lifecycleStatus;
+  record.latencyMs = createStep?.latencyMs ?? record.latencyMs;
   record.firstCommandMs = initialStep?.status === 'success' ? initialStep.latencyMs ?? null : null;
   record.errorCode = failedStep?.errorCode ?? null;
 
@@ -198,13 +254,75 @@ async function uploadArtifacts(input: {
   provider: string;
   target: number;
   results: SandboxResult[];
+  metricsSamples: MetricsSample[];
   client: ReturnType<typeof createBenchmarkClient>;
+  prepared: PreparedArtifacts | null;
 }): Promise<void> {
   const raw = input.results.map(result => JSON.stringify(result)).join('\n') + (input.results.length ? '\n' : '');
-  const meta = buildMeta(input.logicalRunId, input.provider, input.target, input.results);
-  await uploadArtifact(input, 'raw-results', 'raw.jsonl', 'application/x-ndjson', raw);
-  await uploadArtifact(input, 'summary', 'meta.json', 'application/json', JSON.stringify(meta, null, 2));
-  await uploadArtifact(input, 'log', 'coordinator.log', 'text/plain; charset=utf-8', log.dump());
+  const meta = buildMeta(input.logicalRunId, input.provider, input.target, input.results, input.metricsSamples);
+  const metrics = input.metricsSamples.map(sample => JSON.stringify(sample)).join('\n') + (input.metricsSamples.length ? '\n' : '');
+  await uploadPreparedOrCreate(input, input.prepared?.raw, 'raw-results', 'raw.jsonl', 'application/x-ndjson', raw);
+  await uploadPreparedOrCreate(input, input.prepared?.meta, 'summary', 'meta.json', 'application/json', JSON.stringify(meta, null, 2));
+  await uploadPreparedOrCreate(input, input.prepared?.metrics, 'system-metrics', 'metrics.jsonl', 'application/x-ndjson', metrics);
+  await uploadPreparedOrCreate(input, input.prepared?.log, 'log', 'coordinator.log', 'text/plain; charset=utf-8', log.dump());
+}
+
+async function prepareArtifacts(input: {
+  assignment: BenchmarkAssignment;
+  benchmarkSlug: string;
+  runId: string;
+  client: ReturnType<typeof createBenchmarkClient>;
+}): Promise<PreparedArtifacts> {
+  const entries = await Promise.all([
+    prepareArtifact(input, 'raw', 'raw-results', 'raw.jsonl', 'application/x-ndjson'),
+    prepareArtifact(input, 'meta', 'summary', 'meta.json', 'application/json'),
+    prepareArtifact(input, 'metrics', 'system-metrics', 'metrics.jsonl', 'application/x-ndjson'),
+    prepareArtifact(input, 'log', 'log', 'coordinator.log', 'text/plain; charset=utf-8'),
+  ]);
+  const out: PreparedArtifacts = {};
+  for (const entry of entries) {
+    if (entry) out[entry.key] = entry.artifact;
+  }
+  return out;
+}
+
+async function prepareArtifact(
+  input: Pick<Parameters<typeof prepareArtifacts>[0], 'assignment' | 'benchmarkSlug' | 'runId' | 'client'>,
+  key: keyof PreparedArtifacts,
+  kind: string,
+  name: string,
+  contentType: string,
+): Promise<{ key: keyof PreparedArtifacts; artifact: PreparedArtifact } | null> {
+  try {
+    const res = await input.client.createWorkerArtifact(input.benchmarkSlug, input.runId, input.assignment.workerId, {
+      attemptId: input.assignment.attemptId,
+      kind,
+      name,
+      contentType,
+      metadata: { prepared: true },
+    });
+    const uploadUrl = res.uploadUrl ?? res.artifact?.uploadUrl;
+    if (!uploadUrl) throw new Error('no uploadUrl returned');
+    return { key, artifact: { kind, name, contentType, uploadUrl } };
+  } catch (err: any) {
+    log.warn(`bench: artifact ${name} prepare failed: ${err?.message ?? err}`);
+    return null;
+  }
+}
+
+async function uploadPreparedOrCreate(
+  input: Pick<Parameters<typeof uploadArtifacts>[0], 'assignment' | 'benchmarkSlug' | 'runId' | 'client'>,
+  prepared: PreparedArtifact | undefined,
+  kind: string,
+  name: string,
+  contentType: string,
+  body: string,
+): Promise<void> {
+  if (prepared) {
+    await putArtifact(prepared.name, prepared.kind, prepared.contentType, prepared.uploadUrl, body);
+    return;
+  }
+  await uploadArtifact(input, kind, name, contentType, body);
 }
 
 async function uploadArtifact(
@@ -225,15 +343,32 @@ async function uploadArtifact(
     });
     const uploadUrl = res.uploadUrl ?? res.artifact?.uploadUrl;
     if (!uploadUrl) throw new Error('no uploadUrl returned');
-    const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body });
-    if (!put.ok) throw new Error(`${put.status} ${put.statusText}`);
-    log.ok(`bench: uploaded artifact ${name} (${kind}, ${sizeBytes}b)`);
+    await putArtifact(name, kind, contentType, uploadUrl, body, sizeBytes);
   } catch (err: any) {
     log.warn(`bench: artifact ${name} upload failed: ${err?.message ?? err}`);
   }
 }
 
-function buildMeta(runId: string, provider: string, target: number, results: SandboxResult[]): Record<string, unknown> {
+async function putArtifact(
+  name: string,
+  kind: string,
+  contentType: string,
+  uploadUrl: string,
+  body: string,
+  sizeBytes = Buffer.byteLength(body),
+): Promise<void> {
+  const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body });
+  if (!put.ok) throw new Error(`${put.status} ${put.statusText}`);
+  log.ok(`bench: uploaded artifact ${name} (${kind}, ${sizeBytes}b)`);
+}
+
+function buildMeta(
+  runId: string,
+  provider: string,
+  target: number,
+  results: SandboxResult[],
+  metricsSamples: MetricsSample[],
+): Record<string, unknown> {
   const byStatus = {
     success: results.filter(result => result.status === 'success'),
     partial: results.filter(result => result.status === 'partial'),
@@ -274,9 +409,27 @@ function buildMeta(runId: string, provider: string, target: number, results: San
       failed: byStatus.failed.length,
     },
     create_failure_class: createFailureClass,
+    metrics_summary: metricsSummary(metricsSamples),
     run_id: runId,
     provider,
     ended_at: new Date().toISOString(),
+  };
+}
+
+function metricsSummary(samples: MetricsSample[]): Record<string, number> | null {
+  if (samples.length === 0) return null;
+  return {
+    sample_count: samples.length,
+    sample_interval_ms: METRICS_SAMPLE_MS,
+    peak_mem_rss_mb: Math.max(...samples.map(s => s.mem_rss_mb)),
+    peak_mem_heap_used_mb: Math.max(...samples.map(s => s.mem_heap_used_mb)),
+    peak_event_loop_p99_ms: Math.max(...samples.map(s => s.event_loop_p99_ms)),
+    peak_event_loop_max_ms: Math.max(...samples.map(s => s.event_loop_max_ms)),
+    peak_open_fds: Math.max(...samples.map(s => s.open_fds ?? 0)),
+    peak_tcp_inuse: Math.max(...samples.map(s => s.sockstat?.tcp_inuse ?? 0)),
+    peak_tcp_tw: Math.max(...samples.map(s => s.sockstat?.tcp_tw ?? 0)),
+    total_cpu_user_us: samples[samples.length - 1].cpu_user_us,
+    total_cpu_system_us: samples[samples.length - 1].cpu_system_us,
   };
 }
 
@@ -303,6 +456,30 @@ function percentile(sortedValues: number[], quantile: number): number {
   return sortedValues.length === 0
     ? 0
     : sortedValues[Math.min(sortedValues.length - 1, Math.floor(sortedValues.length * quantile))];
+}
+
+function readSockstat(): Record<string, number> | null {
+  try {
+    const data = fs.readFileSync('/proc/net/sockstat', 'utf-8');
+    const out: Record<string, number> = {};
+    for (const line of data.split('\n')) {
+      const idx = line.indexOf(':');
+      if (idx < 0) continue;
+      const section = line.slice(0, idx).trim().toLowerCase();
+      const parts = line.slice(idx + 1).trim().split(/\s+/);
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        const n = parseInt(parts[i + 1], 10);
+        if (!Number.isNaN(n)) out[`${section}_${parts[i]}`] = n;
+      }
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function countOpenFds(): number | null {
+  try { return fs.readdirSync('/proc/self/fd').length; } catch { return null; }
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number, allowZero = false): number {
