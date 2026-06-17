@@ -6,8 +6,8 @@ import type {
   ProgressStats,
 } from './types.js';
 
-export const FIRST_COMMAND_TIMEOUT_MS = 30_000;
-export const LIVENESS_CHECK_TIMEOUT_MS = 30_000;
+export const FIRST_COMMAND_TIMEOUT_MS = 90_000;
+export const LIVENESS_CHECK_TIMEOUT_MS = 90_000;
 
 export interface RunnerCallbacks {
   onResult: (result: SandboxResult) => Promise<void> | void;
