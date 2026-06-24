@@ -215,7 +215,11 @@ async function runSnapshotFork(toRun: typeof storageProviders, datasetLabel: str
   const results: SnapshotForkBenchmarkResult[] = [];
 
   for (const providerConfig of toRun) {
-    const result = await runSnapshotForkBenchmark({ ...providerConfig, iterations: sfIterations }, dataset);
+    // Some providers need a different bucket/credentials for snapshot-fork than
+    // for upload/download (e.g. Tigris's snapshot-enabled bucket); apply it here.
+    const { snapshotFork, ...base } = providerConfig;
+    const config = snapshotFork ? { ...base, ...snapshotFork } : base;
+    const result = await runSnapshotForkBenchmark({ ...config, iterations: sfIterations }, dataset);
     results.push(result);
   }
 

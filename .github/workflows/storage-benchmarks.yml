@@ -143,6 +143,10 @@ jobs:
           TIGRIS_STORAGE_ACCESS_KEY_ID: ${{ secrets.TIGRIS_STORAGE_ACCESS_KEY_ID }}
           TIGRIS_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.TIGRIS_STORAGE_SECRET_ACCESS_KEY }}
           TIGRIS_STORAGE_BUCKET: ${{ secrets.TIGRIS_STORAGE_BUCKET }}
+          # Snapshot-fork uses a dedicated Standard-tier, snapshot-enabled Tigris bucket.
+          TIGRIS_SNAPSHOT_ACCESS_KEY: ${{ secrets.TIGRIS_SNAPSHOT_ACCESS_KEY }}
+          TIGRIS_SNAPSHOT_SECRET_KEY: ${{ secrets.TIGRIS_SNAPSHOT_SECRET_KEY }}
+          TIGRIS_SNAPSHOT_STORAGE_BUCKET: ${{ secrets.TIGRIS_SNAPSHOT_STORAGE_BUCKET }}
         run: |
           npm run bench -- \
             --mode snapshot-fork \

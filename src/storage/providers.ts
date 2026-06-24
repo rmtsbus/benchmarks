@@ -54,6 +54,21 @@ export const storageProviders: StorageProviderConfig[] = [
       }),
     }),
     fileSizes: [1 * 1024 * 1024, 4 * 1024 * 1024, 10 * 1024 * 1024, 16 * 1024 * 1024],
+    // Tigris snapshots require a Standard-tier, snapshot-enabled bucket, which
+    // the default upload/download bucket is not. Point snapshot-fork mode at a
+    // dedicated snapshot-enabled bucket with its own credentials.
+    snapshotFork: {
+      requiredEnvVars: ['TIGRIS_SNAPSHOT_ACCESS_KEY', 'TIGRIS_SNAPSHOT_SECRET_KEY', 'TIGRIS_SNAPSHOT_STORAGE_BUCKET'],
+      bucket: process.env.TIGRIS_SNAPSHOT_STORAGE_BUCKET!,
+      createStorage: () => new Storage({
+        adapter: tigris({
+          bucket: process.env.TIGRIS_SNAPSHOT_STORAGE_BUCKET!,
+          accessKeyId: process.env.TIGRIS_SNAPSHOT_ACCESS_KEY!,
+          secretAccessKey: process.env.TIGRIS_SNAPSHOT_SECRET_KEY!,
+          ...(process.env.TIGRIS_STORAGE_ENDPOINT ? { endpoint: process.env.TIGRIS_STORAGE_ENDPOINT } : {}),
+        }),
+      }),
+    },
   },
   //
   // add providers above
