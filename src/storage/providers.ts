@@ -26,6 +26,24 @@ export const storageProviders: StorageProviderConfig[] = [
       }),
     }),
     fileSizes: [1 * 1024 * 1024, 4 * 1024 * 1024, 10 * 1024 * 1024, 16 * 1024 * 1024], // 1MB, 4MB, 10MB, 16MB
+    // S3 snapshots/forks are emulated as sibling buckets (server-side copy +
+    // root manifest), so they need credentials with bucket create/delete
+    // permission — broader than the object-only creds used for upload/download.
+    // Uses a dedicated bucket so the sibling-bucket churn is isolated.
+    snapshotFork: {
+      requiredEnvVars: ['S3_SNAPSHOT_ACCESS_KEY_ID', 'S3_SNAPSHOT_SECRET_ACCESS_KEY', 'S3_SNAPSHOT_BUCKET'],
+      bucket: process.env.S3_SNAPSHOT_BUCKET!,
+      createStorage: () => new Storage({
+        adapter: s3({
+          bucket: process.env.S3_SNAPSHOT_BUCKET!,
+          region: process.env.AWS_REGION || 'us-east-1',
+          credentials: {
+            accessKeyId: process.env.S3_SNAPSHOT_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.S3_SNAPSHOT_SECRET_ACCESS_KEY!,
+          },
+        }),
+      }),
+    },
   },
   {
     name: 'cloudflare-r2',
@@ -40,6 +58,22 @@ export const storageProviders: StorageProviderConfig[] = [
       }),
     }),
     fileSizes: [1 * 1024 * 1024, 4 * 1024 * 1024, 10 * 1024 * 1024, 16 * 1024 * 1024],
+    // R2 snapshots/forks are emulated as sibling buckets (server-side copy +
+    // root manifest object), so they need an API token with bucket create/delete
+    // permission (R2 "Admin Read & Write") — broader than the object-only token
+    // used for upload/download. Same bucket/account; only the credentials differ.
+    snapshotFork: {
+      requiredEnvVars: ['R2_SNAPSHOT_ACCESS_KEY_ID', 'R2_SNAPSHOT_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_ACCOUNT_ID'],
+      bucket: process.env.R2_BUCKET!,
+      createStorage: () => new Storage({
+        adapter: r2({
+          bucket: process.env.R2_BUCKET!,
+          accountId: process.env.R2_ACCOUNT_ID!,
+          accessKeyId: process.env.R2_SNAPSHOT_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.R2_SNAPSHOT_SECRET_ACCESS_KEY!,
+        }),
+      }),
+    },
   },
   {
     name: 'tigris',
