@@ -52,6 +52,7 @@ jobs:
           - aws-s3
           - cloudflare-r2
           - tigris
+          - vercel-blob
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,6 +93,10 @@ jobs:
           TIGRIS_SNAPSHOT_ACCESS_KEY: ${{ secrets.TIGRIS_SNAPSHOT_ACCESS_KEY }}
           TIGRIS_SNAPSHOT_SECRET_KEY: ${{ secrets.TIGRIS_SNAPSHOT_SECRET_KEY }}
           TIGRIS_SNAPSHOT_STORAGE_BUCKET: ${{ secrets.TIGRIS_SNAPSHOT_STORAGE_BUCKET }}
+          # Vercel Blob emulates snapshots/forks as sibling prefixes within one
+          # store, so it needs only a Read-Write token for a dedicated store.
+          VERCEL_SNAPSHOT_BLOB_READ_WRITE_TOKEN: ${{ secrets.VERCEL_SNAPSHOT_BLOB_READ_WRITE_TOKEN }}
+          VERCEL_SNAPSHOT_BLOB_BUCKET: ${{ secrets.VERCEL_SNAPSHOT_BLOB_BUCKET }}
         run: |
           npm run bench -- \
             --mode snapshot-fork \

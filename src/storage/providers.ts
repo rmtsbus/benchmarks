@@ -120,6 +120,22 @@ export const storageProviders: StorageProviderConfig[] = [
       }),
     }),
     fileSizes: [1 * 1024 * 1024, 4 * 1024 * 1024, 10 * 1024 * 1024, 16 * 1024 * 1024],
+    // Vercel Blob has no native bucket concept: the adapter emulates snapshots
+    // and forks as sibling prefixes within a single store, so it needs only a
+    // Read-Write token (no bucket create/delete perms). Point snapshot-fork mode
+    // at a dedicated store/token so its sibling-prefix churn is isolated from the
+    // upload/download store.
+    snapshotFork: {
+      requiredEnvVars: ['VERCEL_SNAPSHOT_BLOB_READ_WRITE_TOKEN'],
+      bucket: process.env.VERCEL_SNAPSHOT_BLOB_BUCKET || 'benchmarks-snapshot',
+      createStorage: () => new Storage({
+        adapter: vercel({
+          bucket: process.env.VERCEL_SNAPSHOT_BLOB_BUCKET || 'benchmarks-snapshot',
+          token: process.env.VERCEL_SNAPSHOT_BLOB_READ_WRITE_TOKEN!,
+          access: 'private',
+        }),
+      }),
+    },
   },
   {
     name: 'gcs',
