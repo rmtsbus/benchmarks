@@ -97,6 +97,12 @@ jobs:
           TIGRIS_SNAPSHOT_ACCESS_KEY: ${{ secrets.TIGRIS_SNAPSHOT_ACCESS_KEY }}
           TIGRIS_SNAPSHOT_SECRET_KEY: ${{ secrets.TIGRIS_SNAPSHOT_SECRET_KEY }}
           TIGRIS_SNAPSHOT_STORAGE_BUCKET: ${{ secrets.TIGRIS_SNAPSHOT_STORAGE_BUCKET }}
+          # Azure snapshot-fork emulates snapshots/forks as sibling containers,
+          # so it needs an account key (account-level container create/delete)
+          # and a dedicated snapshot container.
+          AZURE_SNAPSHOT_ACCOUNT_NAME: ${{ secrets.AZURE_SNAPSHOT_ACCOUNT_NAME }}
+          AZURE_SNAPSHOT_ACCOUNT_KEY: ${{ secrets.AZURE_SNAPSHOT_ACCOUNT_KEY }}
+          AZURE_SNAPSHOT_CONTAINER: ${{ secrets.AZURE_SNAPSHOT_CONTAINER }}
           # vercel-blob snapshot-fork is disabled pending an adapter fix (see
           # the matrix above and providers.ts). Re-add these when re-enabling.
           # VERCEL_SNAPSHOT_BLOB_READ_WRITE_TOKEN: ${{ secrets.VERCEL_SNAPSHOT_BLOB_READ_WRITE_TOKEN }}
