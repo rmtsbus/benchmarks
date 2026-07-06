@@ -135,6 +135,7 @@ jobs:
               body += '> No browser-throughput benchmark results were generated.\n\n';
             } else {
               const data = JSON.parse(fs.readFileSync(latestPath, 'utf-8'));
+              const expectedActions = data.config?.actionsPerSession ?? 0;
               const results = data.results
                 .filter(r => !r.skipped)
                 .sort((a, b) => (b.compositeScore || 0) - (a.compositeScore || 0));
@@ -152,7 +153,6 @@ jobs:
                   const taskMed = (r.summary.taskMs.median / 1000).toFixed(2) + 's';
                   const taskP95 = (r.summary.taskMs.p95 / 1000).toFixed(2) + 's';
                   const screenshotMed = Math.round(r.summary.perActionType.screenshot?.median || 0) + 'ms';
-                  const expectedActions = 50;
                   const ok = r.iterations.filter(it => !it.error && it.actionsCompleted === expectedActions).length;
                   const count = r.iterations.length;
                   body += `| ${i + 1} | ${name} | ${score} | ${aps} | ${taskMed} | ${taskP95} | ${screenshotMed} | ${ok}/${count} |\n`;
