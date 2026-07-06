@@ -166,7 +166,19 @@ jobs:
             const path = require('path');
 
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const sizes = ['1mb', '4mb', '10mb', '16mb'];
+            // Only render sizes that actually ran in this workflow. The checkout
+            // carries committed latest.json files for every size (from the daily
+            // run), so we derive the size list from this run's downloaded
+            // artifacts (storage-results-<provider>-<size>) instead of hardcoding.
+            const sizeOrder = ['1mb', '4mb', '10mb', '16mb'];
+            const ranSizes = new Set();
+            if (fs.existsSync('artifacts')) {
+              for (const name of fs.readdirSync('artifacts')) {
+                if (!name.startsWith('storage-results-')) continue;
+                ranSizes.add(name.split('-').pop().toLowerCase());
+              }
+            }
+            const sizes = sizeOrder.filter(s => ranSizes.has(s));
             let body = '## Storage Benchmark Results\n\n';
             let hasResults = false;
 
