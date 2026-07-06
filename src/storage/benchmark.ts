@@ -66,7 +66,6 @@ async function runStorageIteration(
   }
 }
 
-// default interations = 100
 export async function runStorageBenchmark(config: StorageProviderConfig, fileSizeBytes: number): Promise<StorageBenchmarkResult> {
   const { name, iterations = 100, timeout = 30000, concurrency = 1, requiredEnvVars, createStorage, bucket } = config;
 
