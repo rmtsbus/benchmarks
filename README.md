@@ -30,7 +30,6 @@
 
 ![Object Storage Snapshot & Fork](./snapshot_fork_small.svg)
 
-[![Benchmarks](https://github.com/computesdk/benchmarks/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/computesdk/benchmarks/actions/workflows/benchmarks.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 **TTI (Time to Interactive)** = API call to first command execution. Lower is better.
@@ -107,7 +106,7 @@ Sponsors enable independent benchmark infrastructure.
 - [x] Add P95 & P99
 - [x] TTI n=100 test
 - [x] TTI n=100 concurrency test (staggered + burst)
-- [ ] 10,000 concurrent sandbox stress test
+- [x] 100,000 concurrent sandbox stress test
 - [ ] Cold start vs warm start metrics
 - [ ] Multi-region testing
 - [x] Cost-per-sandbox-minute
