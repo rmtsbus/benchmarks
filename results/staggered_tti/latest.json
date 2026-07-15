@@ -1,6 +1,6 @@
 {
   "version": "1.1",
-  "timestamp": "2026-07-15T09:07:30.663Z",
+  "timestamp": "2026-07-15T09:12:23.686Z",
   "environment": {
     "node": "v24.18.0",
     "platform": "linux",
@@ -16,100 +16,201 @@
       "mode": "staggered",
       "concurrency": 10,
       "staggerDelayMs": 200,
-      "wallClockMs": 1904.62,
-      "timeToFirstReadyMs": 63.27,
+      "wallClockMs": 1891.34,
+      "timeToFirstReadyMs": 61.25,
       "rampProfile": [
         {
           "launchedAt": 0.01,
-          "readyAt": 104.55,
-          "ttiMs": 73.72
+          "readyAt": 96.47,
+          "ttiMs": 71.2
         },
         {
           "launchedAt": 199.85,
-          "readyAt": 284.79,
-          "ttiMs": 63.27
+          "readyAt": 291.33,
+          "ttiMs": 67.1
         },
         {
-          "launchedAt": 400.04,
-          "readyAt": 489.55,
-          "ttiMs": 65.26
+          "launchedAt": 399.79,
+          "readyAt": 490.16,
+          "ttiMs": 67
         },
         {
-          "launchedAt": 599.8,
-          "readyAt": 683.47,
-          "ttiMs": 63.59
+          "launchedAt": 599.54,
+          "readyAt": 689.43,
+          "ttiMs": 66.84
         },
         {
-          "launchedAt": 799.73,
-          "readyAt": 894.08,
-          "ttiMs": 66.07
+          "launchedAt": 799.79,
+          "readyAt": 888.4,
+          "ttiMs": 61.25
         },
         {
-          "launchedAt": 1000.39,
-          "readyAt": 1090.69,
-          "ttiMs": 68.1
+          "launchedAt": 999.71,
+          "readyAt": 1095.66,
+          "ttiMs": 70.37
         },
         {
-          "launchedAt": 1201.11,
-          "readyAt": 1293.93,
-          "ttiMs": 63.8
+          "launchedAt": 1199.95,
+          "readyAt": 1294.88,
+          "ttiMs": 73.53
         },
         {
-          "launchedAt": 1401.38,
-          "readyAt": 1494.59,
-          "ttiMs": 66.74
+          "launchedAt": 1400.14,
+          "readyAt": 1486.37,
+          "ttiMs": 64.08
         },
         {
-          "launchedAt": 1601.97,
-          "readyAt": 1688,
-          "ttiMs": 63.66
+          "launchedAt": 1600.76,
+          "readyAt": 1693.4,
+          "ttiMs": 70.37
         },
         {
-          "launchedAt": 1802.4,
-          "readyAt": 1904.45,
-          "ttiMs": 71.22
+          "launchedAt": 1800.74,
+          "readyAt": 1891.27,
+          "ttiMs": 68.21
         }
       ],
       "iterations": [
         {
-          "ttiMs": 73.72
+          "ttiMs": 71.2
         },
         {
-          "ttiMs": 63.27
+          "ttiMs": 67.1
         },
         {
-          "ttiMs": 65.26
+          "ttiMs": 67
         },
         {
-          "ttiMs": 63.59
+          "ttiMs": 66.84
         },
         {
-          "ttiMs": 66.07
+          "ttiMs": 61.25
         },
         {
-          "ttiMs": 68.1
+          "ttiMs": 70.37
         },
         {
-          "ttiMs": 63.8
+          "ttiMs": 73.53
         },
         {
-          "ttiMs": 66.74
+          "ttiMs": 64.08
         },
         {
-          "ttiMs": 63.66
+          "ttiMs": 70.37
         },
         {
-          "ttiMs": 71.22
+          "ttiMs": 68.21
         }
       ],
       "summary": {
         "ttiMs": {
-          "median": 65.66,
-          "p95": 73.72,
-          "p99": 73.72
+          "median": 67.66,
+          "p95": 73.53,
+          "p99": 73.53
         }
       },
-      "compositeScore": 99.31,
+      "compositeScore": 99.3,
+      "successRate": 1
+    },
+    {
+      "provider": "isorun",
+      "mode": "staggered",
+      "concurrency": 10,
+      "staggerDelayMs": 200,
+      "wallClockMs": 1836.35,
+      "timeToFirstReadyMs": 14.34,
+      "rampProfile": [
+        {
+          "launchedAt": 0.02,
+          "readyAt": 41.42,
+          "ttiMs": 25.35
+        },
+        {
+          "launchedAt": 200.95,
+          "readyAt": 230.73,
+          "ttiMs": 14.45
+        },
+        {
+          "launchedAt": 401.23,
+          "readyAt": 431.2,
+          "ttiMs": 14.58
+        },
+        {
+          "launchedAt": 601.66,
+          "readyAt": 634.29,
+          "ttiMs": 16.19
+        },
+        {
+          "launchedAt": 802.86,
+          "readyAt": 832.71,
+          "ttiMs": 14.58
+        },
+        {
+          "launchedAt": 1003.31,
+          "readyAt": 1036.99,
+          "ttiMs": 17.54
+        },
+        {
+          "launchedAt": 1203.5,
+          "readyAt": 1233.46,
+          "ttiMs": 14.73
+        },
+        {
+          "launchedAt": 1403.95,
+          "readyAt": 1433.11,
+          "ttiMs": 14.34
+        },
+        {
+          "launchedAt": 1604.59,
+          "readyAt": 1634.14,
+          "ttiMs": 14.42
+        },
+        {
+          "launchedAt": 1804.69,
+          "readyAt": 1836.24,
+          "ttiMs": 15.39
+        }
+      ],
+      "iterations": [
+        {
+          "ttiMs": 25.35
+        },
+        {
+          "ttiMs": 14.45
+        },
+        {
+          "ttiMs": 14.58
+        },
+        {
+          "ttiMs": 16.19
+        },
+        {
+          "ttiMs": 14.58
+        },
+        {
+          "ttiMs": 17.54
+        },
+        {
+          "ttiMs": 14.73
+        },
+        {
+          "ttiMs": 14.34
+        },
+        {
+          "ttiMs": 14.42
+        },
+        {
+          "ttiMs": 15.39
+        }
+      ],
+      "summary": {
+        "ttiMs": {
+          "median": 14.65,
+          "p95": 25.35,
+          "p99": 25.35
+        }
+      },
+      "compositeScore": 99.81,
       "successRate": 1
     }
   ]
