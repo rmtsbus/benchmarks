@@ -5,7 +5,7 @@ import { codesandbox } from '@computesdk/codesandbox';
 import { cloudRun } from '@computesdk/cloud-run';
 // import { collimate } from '@computesdk/collimate';
 import { cloudflare } from '@computesdk/cloudflare';
-import { createosSandbox } from '@computesdk/createos-sandbox';
+import { createosSandbox } from '@bhautikin/compute-createos';
 import { daytona } from '@computesdk/daytona';
 import { declaw } from '@computesdk/declaw';
 import { e2b } from '@computesdk/e2b';
@@ -77,7 +77,11 @@ export const providers: ProviderConfig[] = [
   {
     name: 'createos',
     requiredEnvVars: ['CREATEOS_SANDBOX_API_KEY'],
-    createCompute: () => createosSandbox({ apiKey: process.env.CREATEOS_SANDBOX_API_KEY! }),
+    createCompute: () => createosSandbox({
+      apiKey: process.env.CREATEOS_SANDBOX_API_KEY!,
+      shape: 's-1vcpu-1gb',
+      rootfs: 'devbox:1',
+    }),
   },
   {
     name: 'daytona',
