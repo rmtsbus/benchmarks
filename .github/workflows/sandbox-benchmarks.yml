@@ -58,7 +58,7 @@ jobs:
       matrix:
         provider:
           - createos
-          - isorun
+          # - isorun
     steps:
       - name: Measure network to both providers
         run: |
