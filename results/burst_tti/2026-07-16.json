@@ -1,6 +1,6 @@
 {
   "version": "1.1",
-  "timestamp": "2026-07-16T07:36:56.944Z",
+  "timestamp": "2026-07-16T08:01:00.283Z",
   "environment": {
     "node": "v24.18.0",
     "platform": "linux",
@@ -15,196 +15,10 @@
       "provider": "createos",
       "mode": "concurrent",
       "concurrency": 100,
-      "wallClockMs": 60023.93,
-      "timeToFirstReadyMs": 291.59,
+      "wallClockMs": 60053.58,
+      "timeToFirstReadyMs": 0,
       "iterations": [
         {
-          "ttiMs": 291.59
-        },
-        {
-          "ttiMs": 301.25
-        },
-        {
-          "ttiMs": 303.39
-        },
-        {
-          "ttiMs": 404.08
-        },
-        {
-          "ttiMs": 351.62
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 424.3
-        },
-        {
-          "ttiMs": 471.11
-        },
-        {
-          "ttiMs": 318.39
-        },
-        {
-          "ttiMs": 379.01
-        },
-        {
-          "ttiMs": 437.45
-        },
-        {
-          "ttiMs": 423.61
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 373.52
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 344.84
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 319.54
-        },
-        {
-          "ttiMs": 365.24
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 314.18
-        },
-        {
-          "ttiMs": 0,
-          "error": "First command execution timed out"
-        },
-        {
-          "ttiMs": 292.15
-        },
-        {
-          "ttiMs": 446.01
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 398.85
-        },
-        {
-          "ttiMs": 0,
-          "error": "First command execution timed out"
-        },
-        {
-          "ttiMs": 319.06
-        },
-        {
-          "ttiMs": 368.64
-        },
-        {
-          "ttiMs": 310.38
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 383.71
-        },
-        {
-          "ttiMs": 452.08
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 541.98
-        },
-        {
-          "ttiMs": 418.53
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 487.53
-        },
-        {
-          "ttiMs": 567.4
-        },
-        {
-          "ttiMs": 460.63
-        },
-        {
-          "ttiMs": 584.25
-        },
-        {
-          "ttiMs": 0,
-          "error": "First command execution timed out"
-        },
-        {
-          "ttiMs": 475.68
-        },
-        {
-          "ttiMs": 508.24
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 617.67
-        },
-        {
-          "ttiMs": 512.23
-        },
-        {
-          "ttiMs": 516.8
-        },
-        {
-          "ttiMs": 666.47
-        },
-        {
-          "ttiMs": 617.15
-        },
-        {
-          "ttiMs": 595.68
-        },
-        {
           "ttiMs": 0,
           "error": "First command execution timed out"
         },
@@ -213,88 +27,12 @@
           "error": "Request timed out after 60000ms: POST /v1/sandboxes"
         },
         {
-          "ttiMs": 651.38
-        },
-        {
-          "ttiMs": 531.34
-        },
-        {
-          "ttiMs": 530.01
-        },
-        {
-          "ttiMs": 560.42
-        },
-        {
-          "ttiMs": 674.58
-        },
-        {
-          "ttiMs": 564.44
-        },
-        {
-          "ttiMs": 598.24
-        },
-        {
-          "ttiMs": 0,
-          "error": "First command execution timed out"
-        },
-        {
           "ttiMs": 0,
           "error": "Request timed out after 60000ms: POST /v1/sandboxes"
         },
         {
-          "ttiMs": 621.51
-        },
-        {
-          "ttiMs": 671.08
-        },
-        {
-          "ttiMs": 704.52
-        },
-        {
-          "ttiMs": 721.15
-        },
-        {
-          "ttiMs": 760.49
-        },
-        {
-          "ttiMs": 772.67
-        },
-        {
-          "ttiMs": 0,
-          "error": "First command execution timed out"
-        },
-        {
-          "ttiMs": 775.62
-        },
-        {
           "ttiMs": 0,
           "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 725.55
-        },
-        {
-          "ttiMs": 827.69
-        },
-        {
-          "ttiMs": 870.3
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 817.5
-        },
-        {
-          "ttiMs": 0,
-          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
-        },
-        {
-          "ttiMs": 989.14
-        },
-        {
-          "ttiMs": 977.64
         },
         {
           "ttiMs": 0,
@@ -305,46 +43,376 @@
           "error": "First command execution timed out"
         },
         {
-          "ttiMs": 1041.33
-        },
-        {
-          "ttiMs": 880.96
-        },
-        {
-          "ttiMs": 923.77
-        },
-        {
-          "ttiMs": 935.69
-        },
-        {
           "ttiMs": 0,
           "error": "First command execution timed out"
         },
         {
-          "ttiMs": 1096.47
-        },
-        {
-          "ttiMs": 1148.81
+          "ttiMs": 0,
+          "error": "First command execution timed out"
         },
         {
           "ttiMs": 0,
           "error": "Request timed out after 60000ms: POST /v1/sandboxes"
         },
         {
-          "ttiMs": 1201.84
-        },
-        {
-          "ttiMs": 1366.59
-        },
-        {
-          "ttiMs": 1309.97
-        },
-        {
-          "ttiMs": 1252.95
+          "ttiMs": 0,
+          "error": "First command execution timed out"
         },
         {
           "ttiMs": 0,
           "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "First command execution timed out"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
+        },
+        {
+          "ttiMs": 0,
+          "error": "Request timed out after 60000ms: POST /v1/sandboxes"
         },
         {
           "ttiMs": 0,
@@ -353,13 +421,13 @@
       ],
       "summary": {
         "ttiMs": {
-          "median": 551.2,
-          "p95": 1041.33,
-          "p99": 1201.84
+          "median": 0,
+          "p95": 0,
+          "p99": 0
         }
       },
-      "compositeScore": 62.75,
-      "successRate": 0.68
+      "compositeScore": 0,
+      "successRate": 0
     }
   ]
 }
