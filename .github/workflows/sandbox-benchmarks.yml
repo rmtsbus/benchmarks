@@ -60,21 +60,21 @@ jobs:
           - createos
           # - isorun
     steps:
-      - name: Measure network to both providers
-        run: |
-          echo "== our LB =="
-          for i in 1 2 3; do
-            curl -sSo /dev/null -w "  iter$i tcp=%{time_connect}s tls=%{time_appconnect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n" \
-              https://api.sb.createos.sh/healthz
-          done
-          echo "== isorun LB =="
-          for i in 1 2 3; do
-            curl -sSo /dev/null -w "  iter$i tcp=%{time_connect}s tls=%{time_appconnect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n" \
-              https://run-us.isorun.ai/
-          done
-          echo "== runner info =="
-          curl -sS https://ipinfo.io | grep -E 'ip|city|region|org'
-          node --version
+      # - name: Measure network to both providers
+      #   run: |
+      #     echo "== our LB =="
+      #     for i in 1 2 3; do
+      #       curl -sSo /dev/null -w "  iter$i tcp=%{time_connect}s tls=%{time_appconnect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n" \
+      #         https://api.sb.createos.sh/healthz
+      #     done
+      #     echo "== isorun LB =="
+      #     for i in 1 2 3; do
+      #       curl -sSo /dev/null -w "  iter$i tcp=%{time_connect}s tls=%{time_appconnect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n" \
+      #         https://run-us.isorun.ai/
+      #     done
+      #     echo "== runner info =="
+      #     curl -sS https://ipinfo.io | grep -E 'ip|city|region|org'
+      #     node --version
       - name: Print IP info
         run: curl -s https://ipinfo.io
       - uses: actions/checkout@v4
